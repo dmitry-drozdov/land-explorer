@@ -152,8 +152,8 @@ namespace Comparison
 
 					var sameFirst = basicResult.Count == 0 && modifiedResult.Count == 0 ||
 						basicResult.Count > 0 && modifiedResult.Count > 0 &&
-						modifiedResult[0].Context.HeaderContext.Sequence.SelectMany(h => h.Value.Select(valElem => valElem.Text))
-							.SequenceEqual(basicResult[0].Context.HeaderContext.Sequence.SelectMany(h => h.Value.Select(valElem => valElem.Text)));
+						modifiedResult[0].Context.HeaderContext.Sequence.Select(h => h.Value)
+							.SequenceEqual(basicResult[0].Context.HeaderContext.Sequence.Select(h => h.Value));
 
 					/// Отсекаем элементы, привязку к которым можно обеспечить за счёт базовой эвристики
 					var hasNotChanged = modifiedRemapResult[cp].Count == 1 
@@ -171,12 +171,12 @@ namespace Comparison
 						reportLines.Add(Path.GetFileName(cp.Context.FileContext.Name));
 						reportLines.Add("*");
 
-						reportLines.Add($"{String.Join(" ", cp.Context.HeaderContext.Sequence.SelectMany(c => c.Value.Select(valElem => valElem.Text)))}     {cp.Context.Line}");
+						reportLines.Add($"{String.Join(" ", cp.Context.HeaderContext.Sequence.Select(c => c.Value))}     {cp.Context.Line}");
 						reportLines.Add("*");
 
 						foreach (var landCandidate in basicRemapResult[cp].Take(7))
 						{
-							reportLines.Add($"{String.Join(" ", landCandidate.Context.HeaderContext.Sequence.SelectMany(c => c.Value.Select(valElem => valElem.Text)))}     {landCandidate.Context.Line}");
+							reportLines.Add($"{String.Join(" ", landCandidate.Context.HeaderContext.Sequence.Select(c => c.Value))}     {landCandidate.Context.Line}");
 							reportLines.Add($"{landCandidate.Similarity}  [SimHCore={landCandidate.HeaderCoreSimilarity}; SimH={landCandidate.HeaderNonCoreSimilarity}; SimI={landCandidate.InnerSimilarity}; SimA={landCandidate.AncestorSimilarity}] {(landCandidate.IsAuto ? "*" : (landCandidate.Deleted ? "#" : ""))}");
 						}
 
@@ -194,7 +194,7 @@ namespace Comparison
 
 						foreach (var landCandidate in modifiedRemapResult[cp].Take(7))
 						{
-							reportLines.Add($"{String.Join(" ", landCandidate.Context.HeaderContext.Sequence.SelectMany(c => c.Value.Select(valElem => valElem.Text)))}     {landCandidate.Context.Line}");
+							reportLines.Add($"{String.Join(" ", landCandidate.Context.HeaderContext.Sequence.Select(c => c.Value))}     {landCandidate.Context.Line}");
 							reportLines.Add($"{landCandidate.Similarity}  [SimHCore={landCandidate.HeaderCoreSimilarity}; SimHNCore={landCandidate.HeaderNonCoreSimilarity}; " +
 								$"SimI={landCandidate.InnerSimilarity}; SimA={landCandidate.AncestorSimilarity}; " +
 								$"SimSB={landCandidate.SiblingsBeforeSimilarity}; SimSA={landCandidate.SiblingsAfterSimilarity}; SimS={landCandidate.SiblingsSimilarity}; " +

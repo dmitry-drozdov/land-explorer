@@ -1002,7 +1002,7 @@ namespace Land.Markup.Binding
 			if (a.EqualsIgnoreValue(b))
 			{
 				return a.ExactMatch
-					? a.Value.SequenceEqual(b.Value) ? 1 : 0
+					? a.Value == b.Value ? 1 : 0
 					: Levenshtein(a.Value, b.Value);
 			}
 			else
