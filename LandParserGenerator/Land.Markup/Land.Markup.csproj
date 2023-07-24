@@ -38,8 +38,20 @@
     </AssemblyOriginatorKeyFile>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="Antlr4.Runtime.Standard, Version=4.7.0.0, Culture=neutral, PublicKeyToken=e78b2c5abd1fcb3f, processorArchitecture=MSIL">
+      <SpecificVersion>False</SpecificVersion>
+      <HintPath>..\components\LanD\Core\Antlr4.Runtime.Standard.dll</HintPath>
+    </Reference>
+    <Reference Include="Land.Core, Version=1.0.0.0, Culture=neutral, processorArchitecture=MSIL">
+      <SpecificVersion>False</SpecificVersion>
+      <HintPath>..\components\LanD\Core\Land.Core.dll</HintPath>
+    </Reference>
     <Reference Include="Newtonsoft.Json, Version=9.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed, processorArchitecture=MSIL">
       <HintPath>..\packages\Newtonsoft.Json.9.0.1\lib\net45\Newtonsoft.Json.dll</HintPath>
+    </Reference>
+    <Reference Include="QUT.ShiftReduceParser, Version=1.4.6.0, Culture=neutral, PublicKeyToken=402396ef6102baec, processorArchitecture=MSIL">
+      <SpecificVersion>False</SpecificVersion>
+      <HintPath>..\components\LanD\Core\QUT.ShiftReduceParser.dll</HintPath>
     </Reference>
     <Reference Include="System" />
     <Reference Include="System.Core" />
@@ -87,12 +99,6 @@
     <Compile Include="Tree\Visitors\GetLinearSequenceVisitor.cs" />
     <Compile Include="Tree\Visitors\GroupPointsByFileVisitor.cs" />
     <Compile Include="Tree\Visitors\GroupPointsByTypeVisitor.cs" />
-  </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="..\Land.Core\Land.Core.csproj">
-      <Project>{f1276a3b-a504-47a3-b858-8224ef265795}</Project>
-      <Name>Land.Core</Name>
-    </ProjectReference>
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

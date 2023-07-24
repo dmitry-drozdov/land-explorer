@@ -40,6 +40,9 @@
     </AssemblyOriginatorKeyFile>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="Antlr4.Runtime.Standard">
+      <HintPath>..\components\LanD\Core\Antlr4.Runtime.Standard.dll</HintPath>
+    </Reference>
     <Reference Include="GraphSharp, Version=1.0.0.0, Culture=neutral, processorArchitecture=MSIL">
       <SpecificVersion>False</SpecificVersion>
       <HintPath>..\components\GraphSharp\GraphSharp.dll</HintPath>
@@ -48,12 +51,21 @@
       <SpecificVersion>False</SpecificVersion>
       <HintPath>..\components\GraphSharp\GraphSharp.Controls.dll</HintPath>
     </Reference>
+    <Reference Include="Land.Core">
+      <HintPath>..\components\LanD\Core\Land.Core.dll</HintPath>
+    </Reference>
     <Reference Include="Newtonsoft.Json, Version=9.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed, processorArchitecture=MSIL">
       <HintPath>..\packages\Newtonsoft.Json.9.0.1\lib\net45\Newtonsoft.Json.dll</HintPath>
+    </Reference>
+    <Reference Include="Preprocessor.Core">
+      <HintPath>..\components\LanD\Preprocessors\Core\Preprocessor.Core.dll</HintPath>
     </Reference>
     <Reference Include="QuickGraph, Version=3.2.40122.0, Culture=neutral, PublicKeyToken=f3fb40175eec2af3, processorArchitecture=MSIL">
       <SpecificVersion>False</SpecificVersion>
       <HintPath>..\components\GraphSharp\QuickGraph.dll</HintPath>
+    </Reference>
+    <Reference Include="QUT.ShiftReduceParser">
+      <HintPath>..\components\LanD\Core\QUT.ShiftReduceParser.dll</HintPath>
     </Reference>
     <Reference Include="System" />
     <Reference Include="System.Data" />
@@ -174,14 +186,6 @@
     <Resource Include="Resources\Font-Awesome-5-Solid-900.otf" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\Control.Helpers\Control.Helpers.csproj">
-      <Project>{e45c5fce-03bf-44e8-b9b2-ba3c98350856}</Project>
-      <Name>Control.Helpers</Name>
-    </ProjectReference>
-    <ProjectReference Include="..\Land.Core\Land.Core.csproj">
-      <Project>{f1276a3b-a504-47a3-b858-8224ef265795}</Project>
-      <Name>Land.Core</Name>
-    </ProjectReference>
     <ProjectReference Include="..\Land.Markup\Land.Markup.csproj">
       <Project>{77cf2f7d-c132-443b-ae5f-649c632d3f9c}</Project>
       <Name>Land.Markup</Name>
