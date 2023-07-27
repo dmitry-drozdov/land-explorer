@@ -35,8 +35,21 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="Antlr4.Runtime.Standard">
+      <HintPath>..\..\components\LanD\Core\Antlr4.Runtime.Standard.dll</HintPath>
+    </Reference>
     <Reference Include="ICSharpCode.AvalonEdit, Version=5.0.3.0, Culture=neutral, PublicKeyToken=9cc39be672370310, processorArchitecture=MSIL">
       <HintPath>..\..\packages\AvalonEdit.5.0.4\lib\Net40\ICSharpCode.AvalonEdit.dll</HintPath>
+    </Reference>
+    <Reference Include="Land.Core">
+      <HintPath>..\..\components\LanD\Core\Land.Core.dll</HintPath>
+    </Reference>
+    <Reference Include="Newtonsoft.Json, Version=6.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed, processorArchitecture=MSIL">
+      <SpecificVersion>False</SpecificVersion>
+      <HintPath>..\..\components\LanD\Core\Newtonsoft.Json.dll</HintPath>
+    </Reference>
+    <Reference Include="QUT.ShiftReduceParser">
+      <HintPath>..\..\components\LanD\Core\QUT.ShiftReduceParser.dll</HintPath>
     </Reference>
     <Reference Include="System" />
     <Reference Include="System.Data" />
