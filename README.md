@@ -3,7 +3,7 @@ WPF-based control and Visual Studio extension for speeding up code comprehension
 It allows developers to label code fragments (arbitraty ones as well as syntax entities) and quickly navigate to them in a heavily edited code, as well as 
 to link more information with the labelled fragments, group the labels and thus create a documentation that is automatically synchronized with the edited code.
 
-Short video tutorial (in Russian): https://yadi.sk/i/Cs_cJGNnxSazsA
+[Short video tutorial](https://yadi.sk/i/Cs_cJGNnxSazsA) (in Russian).
 
 The tool uses a context-based code search engine that stores the description of a code fragment as a number of special structures called "contexts"
 and then compares this description with descriptions that can be built for code fragments presented in the edited version of the program. This process is also called "robust binding to code".
