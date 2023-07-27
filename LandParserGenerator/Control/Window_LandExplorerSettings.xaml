@@ -73,7 +73,7 @@
 							</DataTemplate>
 						</DataGridTemplateColumn.CellTemplate>
 					</DataGridTemplateColumn>
-					<DataGridTextColumn Header="Библиотека препроцессора" Binding="{Binding Path=PreprocessorPath}" Width="45*" />
+					<DataGridTextColumn Header="Библиотека препроцессора" Binding="{Binding Path=PreprocessorPath}" Width="50*" />
                     <DataGridTemplateColumn CanUserResize="False">
                         <DataGridTemplateColumn.CellTemplate>
 							<DataTemplate>
