@@ -13,7 +13,7 @@ using Microsoft.VisualStudio.Text.Editor;
 
 namespace Land.VisualStudioExtension.Listeners
 {
-	[Microsoft.VisualStudio.Utilities.ContentType("code")]
+	[Microsoft.VisualStudio.Utilities.ContentType("text")]
 	[Export(typeof(IWpfTextViewCreationListener))]
 	[TextViewRole(PredefinedTextViewRoles.Editable)]
 	internal sealed class TextViewCreationListener : IWpfTextViewCreationListener
