@@ -238,6 +238,11 @@ namespace Land.VisualStudioExtension
 			}
 		}
 
+		public IEnumerable<string> GetAllFiles()
+		{
+			return Directory.EnumerateFiles(WorkingDirectory ?? @"e:\phd\test_repos_graphql", "*.graphql", SearchOption.AllDirectories);
+		}
+
 		#region Settings
 
 		public string WorkingDirectory { get; set; }
@@ -359,6 +364,8 @@ namespace Land.VisualStudioExtension
 					.SkipWhile(c => !lineEndSymbols.Contains(c))
 					.TakeWhile(c => lineEndSymbols.Remove(c)));
 		}
+
+		
 
 		#endregion
 	}

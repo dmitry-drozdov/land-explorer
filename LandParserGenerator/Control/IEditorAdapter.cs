@@ -77,6 +77,8 @@ namespace Land.Control
 		/// </summary>
 		void InsertText(string documentName, string text, PointLocation point);
 
+		IEnumerable<string> GetAllFiles();
+
 		#endregion
 
 

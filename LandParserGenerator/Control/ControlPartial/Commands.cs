@@ -14,6 +14,7 @@ using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Xml;
 using SWF = System.Windows.Forms;
 
 #pragma warning disable CA1031 // Do not catch general exception types
@@ -406,12 +407,53 @@ namespace Land.Control
 				MarkupManager.Clear();
 				MarkupFilePath = null;
 
-				SetStatus("Создана новая разметка", ControlStatus.Success);
+				SetStatus("Вычисление разметки...", ControlStatus.Success);
+
+				SWF.MessageBox.Show("Вычисление разметки...");
+
+				Fill();
 			}
 			catch (Exception ex)
 			{
 				ShowExceptionWindow(ex);
 			}
+		}
+
+		private void Fill()
+		{
+			var files = Editor.GetAllFiles();
+			long parsedTime = 0;
+			long addConcernTime = 0;
+
+			foreach (var file in files)
+			{
+				var watch = System.Diagnostics.Stopwatch.StartNew();
+
+				var pFile = LogFunction(() => GetParsed(file), true, false);
+
+				watch.Stop();
+				parsedTime += watch.ElapsedMilliseconds;
+
+
+				watch = System.Diagnostics.Stopwatch.StartNew();
+				var candidates = GetGraphqlFuncs(pFile).OfType<ExistingConcernPointCandidate>();
+				foreach (var c in candidates)
+				{
+					MarkupManager.AddConcernPoint(
+						c.Node,
+						null,
+						pFile,
+						c.ViewHeader,
+						null,
+						State.SelectedItem_MarkupTreeView?.DataContext as MarkupElement,
+						false
+					);
+				}
+				watch.Stop();
+				addConcernTime += watch.ElapsedMilliseconds;
+			}
+
+			SetStatus($"parsed time: {parsedTime} ms., add concern time: {addConcernTime} ms.", ControlStatus.Success);
 		}
 
 		private void Command_Highlight_Executed(object sender, RoutedEventArgs e)
@@ -648,6 +690,14 @@ namespace Land.Control
 			CollapseOrExpand(MarkupTreeView, true);
 
 			SetStatus("Разметка загружена", ControlStatus.Success);
+		}
+
+		public List<ConcernPointCandidate> GetGraphqlFuncs(ParsedFile file)
+		{
+			var candidates = MarkupManager.GetGraphqlFuncNodes(file.Root)
+				.Select(c => (ConcernPointCandidate)new ExistingConcernPointCandidate(c))
+				.ToList();
+			return candidates;
 		}
 
 		private List<ConcernPointCandidate> GetConcernPointCandidates(
