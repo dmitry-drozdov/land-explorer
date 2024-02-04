@@ -190,8 +190,8 @@ namespace Land.VisualStudioExtension
 			Guid logicalView = VSConstants.LOGVIEWID_Code;
 
 			/// Если не получилось открыть указанный документ, выходим из функции
-			if (ErrorHandler.Failed(openDoc.OpenDocumentViaProject(documentName, 
-				ref logicalView, out Microsoft.VisualStudio.OLE.Interop.IServiceProvider sp, 
+			if (ErrorHandler.Failed(openDoc.OpenDocumentViaProject(documentName,
+				ref logicalView, out Microsoft.VisualStudio.OLE.Interop.IServiceProvider sp,
 				out IVsUIHierarchy hier, out uint itemid, out IVsWindowFrame frame)) || frame == null)
 			{
 				return;
@@ -213,7 +213,7 @@ namespace Land.VisualStudioExtension
 							return;
 					}
 				}
-			
+
 				var mgr = LandExplorerPackage.GetGlobalService(typeof(VsTextManagerClass)) as IVsTextManager;
 
 				mgr.NavigateToLineAndColumn(buffer, ref logicalView,
@@ -238,9 +238,10 @@ namespace Land.VisualStudioExtension
 			}
 		}
 
-		public IEnumerable<string> GetAllFiles()
+		public IEnumerable<string> GetAllFiles(string ext)
 		{
-			return Directory.EnumerateFiles(WorkingDirectory ?? @"e:\phd\test_repos_graphql", "*.graphql", SearchOption.AllDirectories);
+			return Directory.EnumerateFiles(WorkingDirectory ?? @"e:\phd\test_repos\backend", $"*.{ext}", SearchOption.AllDirectories).
+				Where(x => !x.Contains(@"\vendor\"));
 		}
 
 		#region Settings
@@ -267,9 +268,9 @@ namespace Land.VisualStudioExtension
 				.ToList();
 			var allFiles = new HashSet<string>();
 
-			foreach(var project in allProjects)
+			foreach (var project in allProjects)
 			{
-				foreach(ProjectItem item in project.ProjectItems)
+				foreach (ProjectItem item in project.ProjectItems)
 				{
 					allFiles.UnionWith(GetFiles(item));
 				}
@@ -331,7 +332,7 @@ namespace Land.VisualStudioExtension
 		{
 			ThreadHelper.ThrowIfNotOnUIThread();
 
-			switch(item.Kind)
+			switch (item.Kind)
 			{
 				case EnvDTE.Constants.vsProjectItemKindPhysicalFile:
 					return new[] { item.FileNames[0] };
@@ -339,7 +340,7 @@ namespace Land.VisualStudioExtension
 				case EnvDTE.Constants.vsProjectItemKindSubProject:
 				case EnvDTE.Constants.vsProjectItemKindVirtualFolder:
 					var files = new HashSet<string>();
-					foreach(ProjectItem pi in item.ProjectItems)
+					foreach (ProjectItem pi in item.ProjectItems)
 					{
 						files.UnionWith(GetFiles(pi));
 					}
@@ -365,7 +366,7 @@ namespace Land.VisualStudioExtension
 					.TakeWhile(c => lineEndSymbols.Remove(c)));
 		}
 
-		
+
 
 		#endregion
 	}

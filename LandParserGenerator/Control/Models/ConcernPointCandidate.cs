@@ -12,6 +12,8 @@ namespace Land.Control
 	{
 		public string ViewHeader { get; set; }
 
+		public string NormalizedName { get; set; }
+
 		public override string ToString()
 		{
 			return ViewHeader;
@@ -35,6 +37,7 @@ namespace Land.Control
 		{
 			Node = node;
 			ViewHeader = $"{node.Type}: {String.Join(" ", PointContext.GetHeaderContext(node).Sequence_old)}";
+			NormalizedName = ToString().Replace("func_line: ", "").Replace(" :", "").Replace("_", "").ToLower(); // graphql
 		}
 	}
 

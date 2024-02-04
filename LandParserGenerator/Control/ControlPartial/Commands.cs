@@ -7,6 +7,7 @@ using Land.Markup.Binding;
 using Land.Markup.Tree;
 using Microsoft.Win32;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO;
@@ -421,11 +422,13 @@ namespace Land.Control
 
 		private void Fill()
 		{
-			var files = Editor.GetAllFiles();
+			var gqlFiles = Editor.GetAllFiles("graphql");
 			long parsedTime = 0;
 			long addConcernTime = 0;
 
-			foreach (var file in files)
+			var gqls = new Dictionary<string, List<ConcernPointCandidate>>();
+
+			foreach (var file in gqlFiles)
 			{
 				var watch = System.Diagnostics.Stopwatch.StartNew();
 
@@ -436,8 +439,9 @@ namespace Land.Control
 
 
 				watch = System.Diagnostics.Stopwatch.StartNew();
-				var candidates = GetGraphqlFuncs(pFile).OfType<ExistingConcernPointCandidate>();
-				foreach (var c in candidates)
+
+				var list = GetGraphqlFuncs(pFile, gqls).OfType<ExistingConcernPointCandidate>();
+				foreach (var c in list)
 				{
 					MarkupManager.AddConcernPoint(
 						c.Node,
@@ -454,6 +458,45 @@ namespace Land.Control
 			}
 
 			SetStatus($"parsed time: {parsedTime} ms., add concern time: {addConcernTime} ms.", ControlStatus.Success);
+
+			SWF.MessageBox.Show("looking for go resolvers...");
+
+			var goFiles = Editor.GetAllFiles("go");
+
+			SWF.MessageBox.Show($"looking for go resolvers ({goFiles.Count()} files)...");
+
+			foreach (var file in goFiles)
+			{
+				var watch = System.Diagnostics.Stopwatch.StartNew();
+
+				var pFile = LogFunction(() => GetParsed(file), true, false);
+
+				watch.Stop();
+				parsedTime += watch.ElapsedMilliseconds;
+
+
+				watch = System.Diagnostics.Stopwatch.StartNew();
+
+				var list = GetGoResolvers(pFile, gqls).OfType<ExistingConcernPointCandidate>();
+				foreach (var c in list)
+				{
+					MarkupManager.AddConcernPoint(
+						c.Node,
+						null,
+						pFile,
+						c.ViewHeader,
+						null,
+						State.SelectedItem_MarkupTreeView?.DataContext as MarkupElement,
+						false
+					);
+				}
+				watch.Stop();
+				addConcernTime += watch.ElapsedMilliseconds;
+			}
+
+			SetStatus($"parsed time: {parsedTime} ms., add concern time: {addConcernTime} ms.", ControlStatus.Success);
+
+
 		}
 
 		private void Command_Highlight_Executed(object sender, RoutedEventArgs e)
@@ -692,12 +735,47 @@ namespace Land.Control
 			SetStatus("Разметка загружена", ControlStatus.Success);
 		}
 
-		public List<ConcernPointCandidate> GetGraphqlFuncs(ParsedFile file)
+		public List<ConcernPointCandidate> GetGraphqlFuncs(ParsedFile file, Dictionary<string, List<ConcernPointCandidate>> dictionary )
 		{
-			var candidates = MarkupManager.GetGraphqlFuncNodes(file.Root)
-				.Select(c => (ConcernPointCandidate)new ExistingConcernPointCandidate(c))
-				.ToList();
-			return candidates;
+			var list = new List<ConcernPointCandidate>();
+			var nodes = MarkupManager.GetGraphqlFuncNodes(file.Root);
+			foreach (var item in nodes)
+			{
+				var c = (ConcernPointCandidate)new ExistingConcernPointCandidate(item);
+				list.Add(c);
+				if (dictionary.TryGetValue(c.NormalizedName, out var candidates))
+				{
+					candidates.Add(c);
+				}
+				else
+				{
+					dictionary.Add(c.NormalizedName, new List<ConcernPointCandidate>() { c });
+				}
+			}
+			return list;
+		}
+
+		private string GetFuncName(Node node)
+		{
+			if (node == null) return "";
+			return node.Children.FirstOrDefault(x => x.ToString().StartsWith("f_name")).ToString().
+				Replace("f_name: ", "").Replace("_", "").ToLower();
+		}
+
+		public List<ConcernPointCandidate> GetGoResolvers(ParsedFile file, Dictionary<string, List<ConcernPointCandidate>> graphqls)
+		{
+			var list = new List<ConcernPointCandidate>();
+			var nodes = MarkupManager.GetGoFuncNodes(file.Root);
+			foreach (var item in nodes)
+			{
+				var fName = GetFuncName(item);
+				if (graphqls.ContainsKey(fName))
+				{
+					var c = (ConcernPointCandidate)new ExistingConcernPointCandidate(item);
+					list.Add(c);
+				}
+			}
+			return list;
 		}
 
 		private List<ConcernPointCandidate> GetConcernPointCandidates(

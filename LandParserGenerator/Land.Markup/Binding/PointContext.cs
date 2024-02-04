@@ -46,7 +46,7 @@ namespace Land.Markup.Binding
 		}
 	}
 
-	public class HeaderContextElement: IEqualsIgnoreValue
+	public class HeaderContextElement : IEqualsIgnoreValue
 	{
 		public string Type { get; set; }
 
@@ -61,14 +61,14 @@ namespace Land.Markup.Binding
 
 		[JsonProperty]
 		private string SerializableValue
-        {
-			get => String.Join(" ", Value.Select(e=>e.Text));
+		{
+			get => String.Join(" ", Value.Select(e => e.Text));
 
-            set
-            {
+			set
+			{
 				Value = GetWords(value);
-            }
-        }
+			}
+		}
 
 		/// Проверка двух контекстов на совпадение всех полей, кроме поля Value
 		public bool EqualsIgnoreValue(object obj)
@@ -85,9 +85,9 @@ namespace Land.Markup.Binding
 
 		public override bool Equals(object obj)
 		{
-			if(obj is HeaderContextElement elem)
+			if (obj is HeaderContextElement elem)
 			{
-				return ReferenceEquals(this, elem) || Priority == elem.Priority 
+				return ReferenceEquals(this, elem) || Priority == elem.Priority
 					&& Type == elem.Type
 					&& ExactMatch == elem.ExactMatch
 					&& Value.SequenceEqual(elem.Value);
@@ -107,7 +107,7 @@ namespace Land.Markup.Binding
 
 				foreach (var elem in Value)
 				{
-					hashCode = hashCode * -1521134295 
+					hashCode = hashCode * -1521134295
 						+ EqualityComparer<PrioritizedWord>.Default.GetHashCode(elem);
 				}
 
@@ -147,7 +147,7 @@ namespace Land.Markup.Binding
 				Type = node.Type,
 				Value = isExactMatch
 					? new List<PrioritizedWord> { new PrioritizedWord { Text = String.Join("", node.Value), Priority = 1 } }
-					: node.Value.SelectMany(e=>GetWords(e)).ToList(),
+					: node.Value.SelectMany(e => GetWords(e)).ToList(),
 				Priority = node.Options.GetPriority().Value,
 				ExactMatch = isExactMatch
 			};
@@ -186,7 +186,7 @@ namespace Land.Markup.Binding
 				result.Add(new PrioritizedWord
 				{
 					Text = lastWord,
-					Priority = lastWord.All(c=>char.IsLetterOrDigit(c)) ? 1 : 0.1
+					Priority = lastWord.All(c => char.IsLetterOrDigit(c)) ? 1 : 0.1
 				});
 			}
 
@@ -240,14 +240,14 @@ namespace Land.Markup.Binding
 	{
 		public TextOrHash Content { get; set; }
 
-		public InnerContext() 
-		{ 
-			Content = new TextOrHash(); 
+		public InnerContext()
+		{
+			Content = new TextOrHash();
 		}
 
 		public InnerContext(List<SegmentLocation> locations, string fileText)
 		{
-			var text = String.Join(" ", locations.Select(l => 
+			var text = String.Join(" ", locations.Select(l =>
 				fileText.Substring(l.Start.Offset, l.Length.Value)
 			));
 
@@ -288,7 +288,7 @@ namespace Land.Markup.Binding
 		{
 			if (obj is HeaderContext elem)
 			{
-				return ReferenceEquals(this, elem) 
+				return ReferenceEquals(this, elem)
 					|| Sequence.SequenceEqual(elem.Sequence);
 			}
 
@@ -338,9 +338,9 @@ namespace Land.Markup.Binding
 				var hashCode = 1660800360;
 				hashCode = hashCode * -1521134295 + EqualityComparer<string>.Default.GetHashCode(Type);
 
-				foreach(var elem in HeaderContext)
+				foreach (var elem in HeaderContext)
 				{
-					hashCode = hashCode * -1521134295 + 
+					hashCode = hashCode * -1521134295 +
 						EqualityComparer<string>.Default.GetHashCode(elem);
 				}
 
@@ -363,7 +363,7 @@ namespace Land.Markup.Binding
 			return new ContextElement()
 			{
 				Type = node.Type,
-				HeaderContext = PointContext.GetHeaderContext(node).Sequence.SelectMany(e=>e.Value.Select(valElem => valElem.Text)).ToList()
+				HeaderContext = PointContext.GetHeaderContext(node).Sequence.SelectMany(e => e.Value.Select(valElem => valElem.Text)).ToList()
 			};
 		}
 	}
@@ -560,8 +560,8 @@ namespace Land.Markup.Binding
 		}
 
 		public static PointContext GetExtendedContext(
-			Node node, 
-			ParsedFile file, 
+			Node node,
+			ParsedFile file,
 			SiblingsConstructionArgs siblingsArgs,
 			ClosestConstructionArgs closestArgs,
 			PointContext core = null,
@@ -578,7 +578,7 @@ namespace Land.Markup.Binding
 			}
 
 			/// Конструируем контекст соседей, если его нет или если он создан в упрощённом порядке
-			if (siblingsArgs !=null && (core.SiblingsContext == null || core.SiblingsContext.IsSimplified))
+			if (siblingsArgs != null && (core.SiblingsContext == null || core.SiblingsContext.IsSimplified))
 			{
 				core.SiblingsContext = GetSiblingsContext(node, file, siblingsArgs);
 
@@ -633,9 +633,9 @@ namespace Land.Markup.Binding
 			var headerCoreTypes = new HashSet<string>(node.Options.GetHeaderCore());
 			List<Node> sequence;
 
-			if(node.Type == Grammar.CUSTOM_BLOCK_RULE_NAME)
+			if (node.Type == Grammar.CUSTOM_BLOCK_RULE_NAME)
 			{
-				sequence = new List<Node> { 
+				sequence = new List<Node> {
 					node.Children.First(),
 					node.Children.Last()
 				};
@@ -688,7 +688,7 @@ namespace Land.Markup.Binding
 				CoreIndices = grouped.ContainsKey(true)
 					? grouped[true].Select(e => e.idx).ToList()
 					: new List<int>(),
-				Sequence_old = sequence.SelectMany(e=>e.Value).ToList(),
+				Sequence_old = sequence.SelectMany(e => e.Value).ToList(),
 			};
 		}
 
@@ -712,7 +712,7 @@ namespace Land.Markup.Binding
 		{
 			var locations = new List<SegmentLocation>();
 
-			if(node.Type == Grammar.CUSTOM_BLOCK_RULE_NAME)
+			if (node.Type == Grammar.CUSTOM_BLOCK_RULE_NAME)
 			{
 				locations.Add(node.Location
 					.Exclude(node.Children.First().Location)[0]
@@ -723,6 +723,7 @@ namespace Land.Markup.Binding
 			{
 				var stack = new Stack<Node>(Enumerable.Reverse(node.Children));
 
+
 				while (stack.Any())
 				{
 					var current = stack.Pop();
@@ -731,7 +732,10 @@ namespace Land.Markup.Binding
 					{
 						if (current.Type != Grammar.CUSTOM_BLOCK_RULE_NAME)
 						{
-							locations.Add(current.Location);
+							if (current.Location != null) // todo: handle null
+							{
+								locations.Add(current.Location);
+							}
 						}
 						else
 						{
@@ -839,7 +843,7 @@ namespace Land.Markup.Binding
 					new List<ContextElement>(),
 					new List<ContextElement>()
 				);
-		}
+			}
 
 			if (cache != null)
 			{
@@ -908,7 +912,7 @@ namespace Land.Markup.Binding
 		#endregion
 
 		public static SiblingsContext GetSiblingsContext(
-			Node node, 
+			Node node,
 			ParsedFile file,
 			SiblingsConstructionArgs args,
 			SiblingsContextConstructionCache cache = null)
@@ -936,11 +940,11 @@ namespace Land.Markup.Binding
 						Node = e,
 						Offset = e.Location.End.Offset,
 					},
-				}).OrderBy(e=>e.Offset).ToList();
+				}).OrderBy(e => e.Offset).ToList();
 
 				if (cache != null)
 				{
-					if(cache.Neighbours == null)
+					if (cache.Neighbours == null)
 					{
 						cache.Neighbours = new Dictionary<string, List<BorderPoint>>();
 					}
@@ -989,14 +993,14 @@ namespace Land.Markup.Binding
 				};
 			}
 
-			if(cache != null)
+			if (cache != null)
 			{
 				cache.Ancestor = ancestor;
 			}
 
 		SkipParentSearch:
 
-			if(cache?.Siblings != null)
+			if (cache?.Siblings != null)
 			{
 				siblings = cache.Siblings.ToList();
 				goto SkipSiblingsSearch;
@@ -1016,7 +1020,7 @@ namespace Land.Markup.Binding
 				}
 			}
 
-			if(cache != null)
+			if (cache != null)
 			{
 				cache.Siblings = siblings.ToList();
 			}
@@ -1042,7 +1046,7 @@ namespace Land.Markup.Binding
 					beforeBuilder.Append(part);
 				}
 			}
-			
+
 			var afterBuilder = new StringBuilder();
 
 			if (checkAllSiblings)
@@ -1075,7 +1079,7 @@ namespace Land.Markup.Binding
 				Before = !args.CountOnly ? new SiblingsContextPart
 				{
 					All = checkAllSiblings ? new TextOrHash(beforeBuilder.ToString()) : null,
-					Nearest = beforeNeighbors.Take(MAX_COUNT).Select(e => 
+					Nearest = beforeNeighbors.Take(MAX_COUNT).Select(e =>
 						args.ContextFinder.ContextManager.GetContext(e.Node, file, new SiblingsConstructionArgs
 						{
 							ContextFinder = args.ContextFinder,
@@ -1087,7 +1091,7 @@ namespace Land.Markup.Binding
 				After = !args.CountOnly ? new SiblingsContextPart
 				{
 					All = checkAllSiblings ? new TextOrHash(afterBuilder.ToString()) : null,
-					Nearest = afterNeighbours.Take(MAX_COUNT).Select(e => 
+					Nearest = afterNeighbours.Take(MAX_COUNT).Select(e =>
 						args.ContextFinder.ContextManager.GetContext(e.Node, file, new SiblingsConstructionArgs
 						{
 							ContextFinder = args.ContextFinder,
@@ -1174,9 +1178,9 @@ namespace Land.Markup.Binding
 			var result = new List<RemapCandidateInfo>();
 			var prevSimilarity = 0.0;
 
-			foreach(var c in candidates.OrderByDescending(c => c.Similarity))
+			foreach (var c in candidates.OrderByDescending(c => c.Similarity))
 			{
-				if(!ContextFinder.AreDistantEnough(prevSimilarity, c.Similarity.Value))
+				if (!ContextFinder.AreDistantEnough(prevSimilarity, c.Similarity.Value))
 				{
 					result.Add(c);
 				}
@@ -1200,7 +1204,7 @@ namespace Land.Markup.Binding
 				/// Если мы не захватили тот элемент, 
 				/// с которым можно перепутать помечаемый
 				/// из-за полной похожести предков и заголовка
-				if(!result.Contains(mayBeConfused[0]))
+				if (!result.Contains(mayBeConfused[0]))
 				{
 					result.Add(mayBeConfused[0]);
 				}
@@ -1208,11 +1212,11 @@ namespace Land.Markup.Binding
 
 			foreach (var elem in result)
 			{
-				elem.Context.SiblingsContext = 
+				elem.Context.SiblingsContext =
 					GetSiblingsContext(elem.Node, elem.File, args.SiblingsArgs, null);
 			}
 
-			return new HashSet<PointContext>(result.Select(e=>e.Context));
+			return new HashSet<PointContext>(result.Select(e => e.Context));
 		}
 	}
 
@@ -1368,7 +1372,7 @@ namespace Land.Markup.Binding
 			=> e.GetHashCodeIgnoreValue();
 	}
 
-	public class SiblingsConstructionArgs 
+	public class SiblingsConstructionArgs
 	{
 		public ContextFinder ContextFinder { get; set; }
 

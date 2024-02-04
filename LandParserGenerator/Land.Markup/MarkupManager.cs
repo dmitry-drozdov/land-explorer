@@ -355,8 +355,7 @@ namespace Land.Markup
 		}
 
 		/// <summary>
-		/// Получение всех узлов, к которым можно привязаться,
-		/// если команда привязки была вызвана в позиции offset
+		/// Получение всех типов, объявленных в graphql
 		/// </summary>
 		public LinkedList<Node> GetGraphqlFuncNodes(Node root)
 		{
@@ -376,6 +375,33 @@ namespace Land.Markup
 				foreach (var def in child.Children)
 				{
 					if (def.ToString() == "func_line")
+					{
+						pointCandidates.AddFirst(def);
+					}
+				}
+			}
+
+			return pointCandidates;
+		}
+
+		public LinkedList<Node> GetGoFuncNodes(Node root)
+		{
+			var pointCandidates = new LinkedList<Node>();
+
+			if (root == null)
+			{
+				return pointCandidates;
+			}
+
+			foreach (var child in root.Children)
+			{
+				if (child.ToString() != "package_content")
+				{
+					continue;
+				}
+				foreach (var def in child.Children)
+				{
+					if (def.ToString() == "func")
 					{
 						pointCandidates.AddFirst(def);
 					}
