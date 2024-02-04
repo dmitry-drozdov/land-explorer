@@ -762,6 +762,22 @@ namespace Land.Control
 				Replace("f_name: ", "").Replace("_", "").ToLower();
 		}
 
+		private bool CheckResolver(Node node)
+		{
+			if (node == null) return false;
+			var hasReciever = false;
+			var hasArgs = false;
+			var hasReturns = false;
+			foreach (var child in node.Children)
+			{
+				if (child.ToString() == "f_reciever") hasReciever = child.Children.Any();
+				if (child.ToString() == "f_args") hasArgs = child.Children.Count() > 0;
+				if (child.ToString() == "f_returns") hasReturns = child.Children.Count() > 0;
+			}
+
+			return hasReciever && hasArgs && hasReturns;
+		}
+
 		public List<ConcernPointCandidate> GetGoResolvers(ParsedFile file, Dictionary<string, List<ConcernPointCandidate>> graphqls)
 		{
 			var list = new List<ConcernPointCandidate>();
@@ -769,7 +785,7 @@ namespace Land.Control
 			foreach (var item in nodes)
 			{
 				var fName = GetFuncName(item);
-				if (graphqls.ContainsKey(fName))
+				if (graphqls.ContainsKey(fName) && CheckResolver(item))
 				{
 					var c = (ConcernPointCandidate)new ExistingConcernPointCandidate(item);
 					list.Add(c);
