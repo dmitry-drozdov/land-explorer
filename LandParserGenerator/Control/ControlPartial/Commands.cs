@@ -1,4 +1,5 @@
 ﻿using Land.Control.Helpers;
+using Land.Control.Models;
 using Land.Control.Properties;
 using Land.Core;
 using Land.Core.Parsing.Tree;
@@ -9,6 +10,7 @@ using Microsoft.Win32;
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
 using System.Linq;
@@ -16,6 +18,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Xml;
+using System.Xml.Linq;
 using SWF = System.Windows.Forms;
 
 #pragma warning disable CA1031 // Do not catch general exception types
@@ -735,7 +738,7 @@ namespace Land.Control
 			SetStatus("Разметка загружена", ControlStatus.Success);
 		}
 
-		public List<ConcernPointCandidate> GetGraphqlFuncs(ParsedFile file, Dictionary<string, List<ConcernPointCandidate>> dictionary )
+		public List<ConcernPointCandidate> GetGraphqlFuncs(ParsedFile file, Dictionary<string, List<ConcernPointCandidate>> dictionary)
 		{
 			var list = new List<ConcernPointCandidate>();
 			var nodes = MarkupManager.GetGraphqlFuncNodes(file.Root);
@@ -755,43 +758,152 @@ namespace Land.Control
 			return list;
 		}
 
-		private string GetFuncName(Node node)
-		{
-			if (node == null) return "";
-			return node.Children.FirstOrDefault(x => x.ToString().StartsWith("f_name")).ToString().
-				Replace("f_name: ", "").Replace("_", "").ToLower();
-		}
 
-		private bool CheckResolver(Node node)
-		{
-			if (node == null) return false;
-			var hasReciever = false;
-			var hasArgs = false;
-			var hasReturns = false;
-			foreach (var child in node.Children)
-			{
-				if (child.ToString() == "f_reciever") hasReciever = child.Children.Any();
-				if (child.ToString() == "f_args") hasArgs = child.Children.Count() > 0;
-				if (child.ToString() == "f_returns") hasReturns = child.Children.Count() > 0;
-			}
-
-			return hasReciever && hasArgs && hasReturns;
-		}
-
+		/// <summary>
+		///  Кандидаты (пока что) на резолверы
+		/// </summary>
 		public List<ConcernPointCandidate> GetGoResolvers(ParsedFile file, Dictionary<string, List<ConcernPointCandidate>> graphqls)
 		{
+			var nodes = MarkupManager.GetGoNodes(file.Root);
+			var types = GetGoTypes(nodes.Types);
+
+			var funcs = GetGoResolverCandidates(nodes.Funcs, types, graphqls);
+
 			var list = new List<ConcernPointCandidate>();
-			var nodes = MarkupManager.GetGoFuncNodes(file.Root);
-			foreach (var item in nodes)
+
+			foreach (var item in funcs)
 			{
-				var fName = GetFuncName(item);
-				if (graphqls.ContainsKey(fName) && CheckResolver(item))
+				var c = (ConcernPointCandidate)new ExistingConcernPointCandidate(item.Node);
+				list.Add(c);
+			}
+
+			return list;
+		}
+		/// <summary>
+		/// Кадндидаты на резолверы (у кого есть аргумент struct)
+		/// </summary>
+		public List<GoFuncNode> GetGoResolverCandidates(
+			LinkedList<Node> nodes,
+			Dictionary<string, GoTypeNode> goTypes,
+			Dictionary<string, List<ConcernPointCandidate>> graphqls)
+		{
+			var res = new List<GoFuncNode>();
+			foreach (var node in nodes)
+			{
+				var hasReciever = false;
+				var hasArgs = false;
+				var hasReturns = false;
+				var correctName = false;
+				var candidate = (GoFuncNode)null;
+
+				var debugName = "";
+
+				bool ok() => hasArgs && hasReciever && hasReturns && correctName;
+
+				foreach (var child in node.Children)
 				{
-					var c = (ConcernPointCandidate)new ExistingConcernPointCandidate(item);
-					list.Add(c);
+					var str = child.ToString();
+
+					if (str.StartsWith("f_name: "))
+					{
+						debugName = str.Replace("f_name: ", "").Replace("_", "").ToLower();
+						correctName = graphqls.ContainsKey(debugName);
+					}
+					if (str == "f_reciever") hasReciever = child.Children.Count() > 0;
+					if (str == "f_returns") hasReturns = child.Children.Count() > 0;
+					if (str == "f_args")
+					{
+						var args = child.Children.Where(x => x.ToString().StartsWith("f_arg: "));
+
+						hasArgs = args.Count() == 1 || args.Count() == 2;
+						if (!hasArgs) break;
+						foreach (var arg in args) // always 1 or 2 args for resolver
+						{
+							var argType = arg.ToString().Replace("f_arg: ", "");
+							if (argType == "anon_struct")
+							{
+								// yay!
+								candidate = new GoFuncNode(node);
+								break;
+							}
+							if (goTypes.TryGetValue(argType, out var goType))
+							{
+								if (goType.GoType is StructType)
+								{
+									// this struct has been seen earlier
+									candidate = new GoFuncNode(node);
+									break;
+								}
+							}
+						}
+					}
+				}
+
+				if (ok() && candidate != null) res.Add(candidate);
+			}
+			return res;
+		}
+
+		/// <summary>
+		/// Находит все Go объявленные типы в файле (пока только структуры)
+		/// </summary>
+		public Dictionary<string, GoTypeNode> GetGoTypes(LinkedList<Node> nodes)
+		{
+			var types = new Dictionary<string, GoTypeNode>();
+
+			foreach (var typeDef in nodes)
+			{
+				var node = typeDef.Children.FirstOrDefault(x => x.ToString() == "struct_type");
+				if (node == null) continue;
+
+				var stName = node.Children.First().ToString().Replace("ID: ", "");
+				var st = new StructType(stName);
+
+				node = node.Children?.FirstOrDefault(x => x.ToString() == "anon_struct")?.
+					Children?.FirstOrDefault(x => x.ToString() == "struct_content");
+				if (node == null) continue;
+
+
+				bool onlyOneField = node.Children.Count <= 2;
+				string lastType = "";
+				string lastDelim = "";
+				node.Children.Reverse();
+				foreach (var item in node.Children)
+				{
+					if (item.ToString() == "struct_delim")
+					{
+						lastDelim = item.Children[0].ToString().Contains(",") ? "," : "\n";
+						continue;
+					}
+
+
+					var goTypes = item.Children.Where(x => x.ToString() == "go_type");
+					if (goTypes.Count() > 1 || lastDelim == "\n" || onlyOneField) // embeded structs
+					{
+						lastType = goTypes.Last().Children.First(x => x.ToString() != "arr_ptr").ToString().Replace("ID: ", "");
+					}
+
+					if (types.TryGetValue(lastType, out var goType))
+					{
+						st.Fields.Add(goType.GoType);
+					}
+					else
+					{
+						st.Fields.Add(new SimpleType(lastType));
+					}
+				}
+
+				if (types.ContainsKey(stName))
+				{
+					SWF.MessageBox.Show($"duplicated type! {stName}");
+				}
+				else
+				{
+					types.Add(stName, new GoTypeNode(node, st));
 				}
 			}
-			return list;
+
+			return types;
 		}
 
 		private List<ConcernPointCandidate> GetConcernPointCandidates(

@@ -384,13 +384,18 @@ namespace Land.Markup
 			return pointCandidates;
 		}
 
-		public LinkedList<Node> GetGoFuncNodes(Node root)
+		/// <summary>
+		/// Находит все типы и функции 
+		/// </summary>
+		/// <param name="root"></param>
+		/// <returns></returns>
+		public GoNodes GetGoNodes(Node root)
 		{
-			var pointCandidates = new LinkedList<Node>();
+			var goNodes = new GoNodes(new LinkedList<Node>(), new LinkedList<Node>());
 
 			if (root == null)
 			{
-				return pointCandidates;
+				return goNodes;
 			}
 
 			foreach (var child in root.Children)
@@ -403,12 +408,16 @@ namespace Land.Markup
 				{
 					if (def.ToString() == "func")
 					{
-						pointCandidates.AddFirst(def);
+						goNodes.Funcs.AddFirst(def);
+					}
+					if (def.ToString() == "type_def")
+					{
+						goNodes.Types.AddFirst(def);
 					}
 				}
 			}
 
-			return pointCandidates;
+			return goNodes;
 		}
 
 		/// <summary>
@@ -1065,6 +1074,18 @@ namespace Land.Markup
 
 				action(elem);
 			}
+		}
+	}
+
+	public class GoNodes
+	{
+		public LinkedList<Node> Funcs { get; set; }
+		public LinkedList<Node> Types { get; set; }
+
+		public GoNodes(LinkedList<Node> Funcs, LinkedList<Node> Types)
+		{
+			this.Funcs = Funcs;
+			this.Types = Types;
 		}
 	}
 }
