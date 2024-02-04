@@ -790,56 +790,56 @@ namespace Land.Control
 			var res = new List<GoFuncNode>();
 			foreach (var node in nodes)
 			{
-				var hasReciever = false;
-				var hasArgs = false;
-				var hasReturns = false;
-				var correctName = false;
 				var candidate = (GoFuncNode)null;
 
-				var debugName = "";
+				//bool ok() => hasArgs && hasReciever && hasReturns && correctName;
 
-				bool ok() => hasArgs && hasReciever && hasReturns && correctName;
+				// func, f_reciever, f_name, f_args, f_returns
 
-				foreach (var child in node.Children)
+				var idx = 1;
+				Node nextChild() => node.Children[idx++];
+
+				// f_reciever
+				var child = nextChild();
+				if (child.ToString() == "f_reciever")
 				{
-					var str = child.ToString();
+					if (child.Children.Count() == 0) break;
+				}
+				else break;
 
-					if (str.StartsWith("f_name: "))
+				// f_name
+				child = nextChild();
+				if (!graphqls.ContainsKey(child.ToString().Replace("f_name: ", "").Replace("_", "").ToLower())) break;
+
+				// f_args
+				child = nextChild();
+				var args = child.Children.Where(x => x.ToString().StartsWith("f_arg: "));
+				if (args.Count() != 1 && args.Count() != 2) break;
+
+				foreach (var arg in args) // always 1 or 2 args for resolver
+				{
+					var argType = arg.ToString().Replace("f_arg: ", "");
+					if (argType == "anon_struct")
 					{
-						debugName = str.Replace("f_name: ", "").Replace("_", "").ToLower();
-						correctName = graphqls.ContainsKey(debugName);
+						candidate = new GoFuncNode(node);
+						break;
 					}
-					if (str == "f_reciever") hasReciever = child.Children.Count() > 0;
-					if (str == "f_returns") hasReturns = child.Children.Count() > 0;
-					if (str == "f_args")
+					if (goTypes.TryGetValue(argType, out var goType))
 					{
-						var args = child.Children.Where(x => x.ToString().StartsWith("f_arg: "));
-
-						hasArgs = args.Count() == 1 || args.Count() == 2;
-						if (!hasArgs) break;
-						foreach (var arg in args) // always 1 or 2 args for resolver
+						if (goType.GoType is StructType)
 						{
-							var argType = arg.ToString().Replace("f_arg: ", "");
-							if (argType == "anon_struct")
-							{
-								// yay!
-								candidate = new GoFuncNode(node);
-								break;
-							}
-							if (goTypes.TryGetValue(argType, out var goType))
-							{
-								if (goType.GoType is StructType)
-								{
-									// this struct has been seen earlier
-									candidate = new GoFuncNode(node);
-									break;
-								}
-							}
+							// this struct has been seen earlier
+							candidate = new GoFuncNode(node);
+							break;
 						}
 					}
 				}
 
-				if (ok() && candidate != null) res.Add(candidate);
+				// f_returns
+				child = nextChild();
+				if (child.Children.Count() == 0) break;
+
+				if (candidate != null) res.Add(candidate);
 			}
 			return res;
 		}
