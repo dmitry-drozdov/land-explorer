@@ -764,12 +764,10 @@ namespace Land.Control
 		/// </summary>
 		public List<ConcernPointCandidate> GetGoResolvers(ParsedFile file, Dictionary<string, List<ConcernPointCandidate>> graphqls)
 		{
+			var list = new List<ConcernPointCandidate>();
 			var nodes = MarkupManager.GetGoNodes(file.Root);
 			var types = GetGoTypes(nodes.Types);
-
 			var funcs = GetGoResolverCandidates(nodes.Funcs, types, graphqls);
-
-			var list = new List<ConcernPointCandidate>();
 
 			foreach (var item in funcs)
 			{
@@ -792,29 +790,25 @@ namespace Land.Control
 			{
 				var candidate = (GoFuncNode)null;
 
-				//bool ok() => hasArgs && hasReciever && hasReturns && correctName;
-
 				// func, f_reciever, f_name, f_args, f_returns
 
 				var idx = 1;
-				Node nextChild() => node.Children[idx++];
+				Node nextChild() { return node.Children[idx++]; }
 
 				// f_reciever
 				var child = nextChild();
-				if (child.ToString() == "f_reciever")
-				{
-					if (child.Children.Count() == 0) break;
-				}
-				else break;
+				if (child.ToString() != "f_reciever" || child.Children.Count() == 0) continue;
+
 
 				// f_name
 				child = nextChild();
-				if (!graphqls.ContainsKey(child.ToString().Replace("f_name: ", "").Replace("_", "").ToLower())) break;
+				if (!graphqls.ContainsKey(child.ToString().Replace("f_name: ", "").Replace("_", "").ToLower())) continue;
+
 
 				// f_args
 				child = nextChild();
 				var args = child.Children.Where(x => x.ToString().StartsWith("f_arg: "));
-				if (args.Count() != 1 && args.Count() != 2) break;
+				if (args.Count() != 1 && args.Count() != 2) continue;
 
 				foreach (var arg in args) // always 1 or 2 args for resolver
 				{
@@ -837,7 +831,7 @@ namespace Land.Control
 
 				// f_returns
 				child = nextChild();
-				if (child.Children.Count() == 0) break;
+				if (child.Children.Count() == 0) continue;
 
 				if (candidate != null) res.Add(candidate);
 			}
