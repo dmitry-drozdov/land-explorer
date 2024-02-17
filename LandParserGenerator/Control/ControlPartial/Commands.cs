@@ -767,25 +767,38 @@ namespace Land.Control
 			var list = new List<ConcernPointCandidate>();
 			var nodes = MarkupManager.GetGoNodes(file.Root);
 			var types = GetGoTypes(nodes.Types);
-			var funcs = GetGoResolverCandidates(nodes.Funcs, types, graphqls);
+			var cands = GetGoResolverCandidates(nodes.Funcs, types, graphqls);
 
-			foreach (var item in funcs)
+			var (resolvers, funcsPerReciever) = cands;
+			foreach (var item in resolvers)
 			{
-				var c = (ConcernPointCandidate)new ExistingConcernPointCandidate(item.Node);
+				var max = item.Value[0];
+				var maxN = funcsPerReciever[max.Reciever];
+				// ищем функцию, которая принадлежит классу с наибольшим количество функций, подходящих нам
+				foreach (var r in item.Value)
+				{
+					if (funcsPerReciever[r.Reciever] > maxN)
+					{
+						max = r;
+						maxN = funcsPerReciever[r.Reciever];
+					}
+				}
+				var c = (ConcernPointCandidate)new ExistingConcernPointCandidate(max.Node);
 				list.Add(c);
 			}
 
 			return list;
 		}
 		/// <summary>
-		/// Кадндидаты на резолверы (у кого есть аргумент struct)
+		/// Кандидаты на резолверы (у кого есть аргумент struct)
 		/// </summary>
-		public List<GoFuncNode> GetGoResolverCandidates(
+		public (Dictionary<GoFuncNode, List<GoFuncNode>>, Dictionary<string, int>) GetGoResolverCandidates(
 			LinkedList<Node> nodes,
 			Dictionary<string, GoTypeNode> goTypes,
 			Dictionary<string, List<ConcernPointCandidate>> graphqls)
 		{
-			var res = new List<GoFuncNode>();
+			var res = new Dictionary<GoFuncNode, List<GoFuncNode>>(); // функции-тезки с разными резолверами
+			var funcsPerReciever = new Dictionary<string, int>();
 			foreach (var node in nodes)
 			{
 				var candidate = (GoFuncNode)null;
@@ -798,11 +811,13 @@ namespace Land.Control
 				// f_reciever
 				var child = nextChild();
 				if (child.ToString() != "f_reciever" || child.Children.Count() == 0) continue;
+				var reciver = child.Children.Last().ToString().Replace("ID: ", "");
 
 
 				// f_name
 				child = nextChild();
-				if (!graphqls.ContainsKey(child.ToString().Replace("f_name: ", "").Replace("_", "").ToLower())) continue;
+				var name = child.ToString().Replace("f_name: ", "").Replace("_", "").ToLower();
+				if (!graphqls.ContainsKey(name)) continue;
 
 
 				// f_args
@@ -815,7 +830,7 @@ namespace Land.Control
 					var argType = arg.ToString().Replace("f_arg: ", "");
 					if (argType == "anon_struct")
 					{
-						candidate = new GoFuncNode(node);
+						candidate = new GoFuncNode(node, reciver, name);
 						break;
 					}
 					if (goTypes.TryGetValue(argType, out var goType))
@@ -823,7 +838,7 @@ namespace Land.Control
 						if (goType.GoType is StructType)
 						{
 							// this struct has been seen earlier
-							candidate = new GoFuncNode(node);
+							candidate = new GoFuncNode(node, reciver, name);
 							break;
 						}
 					}
@@ -833,9 +848,28 @@ namespace Land.Control
 				child = nextChild();
 				if (child.Children.Count() == 0) continue;
 
-				if (candidate != null) res.Add(candidate);
+				if (candidate == null) continue;
+
+				if (funcsPerReciever.TryGetValue(reciver, out _))
+				{
+					funcsPerReciever[reciver]++;
+				}
+				else
+				{
+					funcsPerReciever.Add(reciver, 0);
+				}
+
+				if (res.TryGetValue(candidate, out var funcs))
+				{
+					funcs.Add(candidate);
+				}
+				else
+				{
+					res.Add(candidate, new List<GoFuncNode>() { candidate });
+				}
+
 			}
-			return res;
+			return (res, funcsPerReciever);
 		}
 
 		/// <summary>
