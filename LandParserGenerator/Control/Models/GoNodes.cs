@@ -1,4 +1,5 @@
 ﻿using Land.Core.Parsing.Tree;
+using Land.Markup;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -10,13 +11,17 @@ namespace Land.Control.Models
 {
 	public class GoFuncNode
 	{
+		public ParsedFile ParsedFile { get; set; }
 		public Node Node { get; set; }
 		public string Reciever { get; set; }
+		public string Package { get; set; }
 		public string Name { get; set; }
-		public GoFuncNode(Node node, string reciever, string name)
+		public GoFuncNode(ParsedFile file, Node node, string reciever, string package, string name)
 		{
+			ParsedFile = file;
 			Node = node;
 			Reciever = reciever;
+			Package = package;
 			Name = name;
 		}
 		public override int GetHashCode()

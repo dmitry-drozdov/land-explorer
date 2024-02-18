@@ -438,6 +438,12 @@ namespace Land.Control
 
 				var pFile = LogFunction(() => GetParsed(file), true, false);
 
+				if (pFile == null)
+				{
+					// todo: handle
+					continue;
+				}
+
 				watch.Stop();
 				parsedTime += watch.ElapsedMilliseconds;
 
@@ -457,7 +463,7 @@ namespace Land.Control
 						pFile,
 						c.ViewHeader,
 						"graphql schema",
-						group,//State.SelectedItem_MarkupTreeView?.DataContext as MarkupElement,
+						group,
 						false
 					);
 				}
@@ -473,38 +479,58 @@ namespace Land.Control
 
 			SWF.MessageBox.Show($"looking for go resolvers ({goFiles.Count()} files)...");
 
+			var resolvers = new Dictionary<GoFuncNode, List<GoFuncNode>>();
+			var funcsPerReciever = new Dictionary<string, int>();
+			var funcsPerPackage = new Dictionary<string, int>();
+
 			foreach (var file in goFiles)
 			{
-				var watch = System.Diagnostics.Stopwatch.StartNew();
-
 				var pFile = LogFunction(() => GetParsed(file), true, false);
 
-				watch.Stop();
-				parsedTime += watch.ElapsedMilliseconds;
+				VisitGoResolvers(pFile, gqls, resolvers, funcsPerReciever, funcsPerPackage);
+			}
 
+			int weigth(GoFuncNode node) { return funcsPerReciever[node.Reciever] + funcsPerPackage[node.Package]; }
 
-				watch = System.Diagnostics.Stopwatch.StartNew();
-
-				var list = GetGoResolvers(pFile, gqls);//.OfType<ExistingConcernPointCandidate>();
-				foreach (var c in list)
+			foreach (var item in resolvers)
+			{
+				var max = item.Value[0];
+				var maxN = weigth(max);
+				// ищем функцию, которая принадлежит классу и пакету с наибольшим количество функций, подходящих нам
+				foreach (var r in item.Value)
 				{
-					MarkupManager.AddConcernPoint(
+					if (weigth(r) > maxN)
+					{
+						max = r;
+						maxN = weigth(r);
+					}
+				}
+				var c = (ConcernPointCandidate)new ExistingConcernPointCandidate(max.Node);
+				c.NormalizedName = max.Name;
+
+				MarkupManager.AddConcernPoint(
 						(c as ExistingConcernPointCandidate).Node,
 						null,
-						pFile,
+						max.ParsedFile,
 						c.ViewHeader,
 						null,
 						groups[c.NormalizedName],
 						false
-					);
-				}
-				watch.Stop();
-				addConcernTime += watch.ElapsedMilliseconds;
+				);
 			}
 
-			SetStatus($"parsed time: {parsedTime} ms., add concern time: {addConcernTime} ms.", ControlStatus.Success);
 
-
+			// debug
+			/*var bad = 0;
+			foreach (var group in groups)
+			{
+				if (group.Value.Elements.Count == 2)
+				{
+					group.Value.Name = "";
+				}
+				else bad++;
+			}
+			SetStatus($"bad concerns: {bad}", ControlStatus.Success);*/
 		}
 
 		private void Command_Highlight_Executed(object sender, RoutedEventArgs e)
@@ -767,45 +793,32 @@ namespace Land.Control
 		/// <summary>
 		///  Кандидаты (пока что) на резолверы. Reciever -> go func
 		/// </summary>
-		public List<ConcernPointCandidate> GetGoResolvers(
-			ParsedFile file, Dictionary<string, List<ConcernPointCandidate>> graphqls)
+		public void VisitGoResolvers(
+			ParsedFile file,
+			Dictionary<string, List<ConcernPointCandidate>> graphqls,
+			Dictionary<GoFuncNode, List<GoFuncNode>> res,
+			Dictionary<string, int> funcsPerReciever, // функции-тезки с разными резолверами
+			Dictionary<string, int> funcsPerPackage
+			)
 		{
-			var res = new List<ConcernPointCandidate>();
 			var nodes = MarkupManager.GetGoNodes(file.Root);
 			var types = GetGoTypes(nodes.Types);
-			var cands = GetGoResolverCandidates(nodes.Funcs, types, graphqls);
-
-			var (resolvers, funcsPerReciever) = cands;
-			foreach (var item in resolvers)
-			{
-				var max = item.Value[0];
-				var maxN = funcsPerReciever[max.Reciever];
-				// ищем функцию, которая принадлежит классу с наибольшим количество функций, подходящих нам
-				foreach (var r in item.Value)
-				{
-					if (funcsPerReciever[r.Reciever] > maxN)
-					{
-						max = r;
-						maxN = funcsPerReciever[r.Reciever];
-					}
-				}
-				var c = (ConcernPointCandidate)new ExistingConcernPointCandidate(max.Node);
-				c.NormalizedName = max.Name;
-				res.Add(c);
-			}
-
-			return res;
+			VisitGoResolverCandidates(file, nodes.Funcs, types, graphqls, res, funcsPerReciever, funcsPerPackage);
 		}
 		/// <summary>
 		/// Кандидаты на резолверы (у кого есть аргумент struct)
 		/// </summary>
-		public (Dictionary<GoFuncNode, List<GoFuncNode>>, Dictionary<string, int>) GetGoResolverCandidates(
+		public (Dictionary<GoFuncNode, List<GoFuncNode>>, Dictionary<string, int>) VisitGoResolverCandidates(
+			ParsedFile file,
 			LinkedList<Node> nodes,
 			Dictionary<string, GoTypeNode> goTypes,
-			Dictionary<string, List<ConcernPointCandidate>> graphqls)
+			Dictionary<string, List<ConcernPointCandidate>> graphqls,
+			Dictionary<GoFuncNode, List<GoFuncNode>> res,
+			Dictionary<string, int> funcsPerReciever, // функции-тезки с разными резолверами
+			Dictionary<string, int> funcsPerPackage // функции-тезки с разными резолверами
+			)
 		{
-			var res = new Dictionary<GoFuncNode, List<GoFuncNode>>(); // функции-тезки с разными резолверами
-			var funcsPerReciever = new Dictionary<string, int>();
+			var package = file.Root.Children[1].Children[0].ToString().Replace("ID: ", "");
 			foreach (var node in nodes)
 			{
 				var candidate = (GoFuncNode)null;
@@ -818,7 +831,7 @@ namespace Land.Control
 				// f_reciever
 				var child = nextChild();
 				if (child.ToString() != "f_reciever" || child.Children.Count() == 0) continue;
-				var reciver = child.Children.Last().ToString().Replace("ID: ", "");
+				var reciver = child.Children.Last().Children.First().ToString().Replace("ID: ", "");
 
 
 				// f_name
@@ -826,55 +839,65 @@ namespace Land.Control
 				var name = child.ToString().Replace("f_name: ", "").Replace("_", "").ToLower();
 				if (!graphqls.ContainsKey(name)) continue;
 
-
 				// f_args
 				child = nextChild();
 				var args = child.Children.Where(x => x.ToString().StartsWith("f_arg: "));
-				if (args.Count() != 1 && args.Count() != 2) continue;
 
-				foreach (var arg in args) // always 1 or 2 args for resolver
+				var weight = 0;
+
+				switch (args.Count())
 				{
-					var argType = arg.ToString().Replace("f_arg: ", "");
-					if (argType == "anon_struct")
-					{
-						candidate = new GoFuncNode(node, reciver, name);
-						break;
-					}
-					if (goTypes.TryGetValue(argType, out var goType))
-					{
-						if (goType.GoType is StructType)
+					case 0: continue;
+					case 1:
+					case 2:
+						weight = 2;
+						foreach (var arg in args) // always 1 or 2 args for resolver
 						{
-							// this struct has been seen earlier
-							candidate = new GoFuncNode(node, reciver, name);
-							break;
+							var argType = arg.ToString().Replace("f_arg: ", "");
+							if (argType == "anon_struct")
+							{
+								weight = 3;
+								break;
+							}
+							if (goTypes.TryGetValue(argType, out var goType))
+							{
+								if (goType.GoType is StructType)
+								{
+									// this struct has been seen earlier
+									weight = 3;
+									break;
+								}
+							}
 						}
-					}
+						break;
+					default:
+						weight = 1; // странная библиотека, позволяющая аргументы записывать в линейном виде
+						break;
+
 				}
+
 
 				// f_returns
 				child = nextChild();
 				if (child.Children.Count() == 0) continue;
 
-				if (candidate == null) continue;
+				candidate = new GoFuncNode(file, node, reciver, package, name);
+
 
 				if (funcsPerReciever.TryGetValue(reciver, out _))
-				{
-					funcsPerReciever[reciver]++;
-				}
+					funcsPerReciever[reciver] += weight;
 				else
-				{
-					funcsPerReciever.Add(reciver, 0);
-				}
+					funcsPerReciever.Add(reciver, weight);
+
+				if (funcsPerPackage.TryGetValue(package, out _))
+					funcsPerPackage[package] += weight;
+				else
+					funcsPerPackage.Add(package, weight);
 
 				if (res.TryGetValue(candidate, out var funcs))
-				{
 					funcs.Add(candidate);
-				}
 				else
-				{
 					res.Add(candidate, new List<GoFuncNode>() { candidate });
-				}
-
 			}
 			return (res, funcsPerReciever);
 		}
