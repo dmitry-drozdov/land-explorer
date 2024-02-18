@@ -430,6 +430,7 @@ namespace Land.Control
 			long addConcernTime = 0;
 
 			var gqls = new Dictionary<string, List<ConcernPointCandidate>>();
+			var groups = new Dictionary<string, Concern>(); // functionality name -> group (concern) in markup
 
 			foreach (var file in gqlFiles)
 			{
@@ -446,13 +447,17 @@ namespace Land.Control
 				var list = GetGraphqlFuncs(pFile, gqls).OfType<ExistingConcernPointCandidate>();
 				foreach (var c in list)
 				{
+					var name = c.Node.Children.First().ToString();
+					var group = MarkupManager.AddConcern(name);
+					groups.Add(name.ToLower().Replace("id: ", ""), group);
+
 					MarkupManager.AddConcernPoint(
 						c.Node,
 						null,
 						pFile,
 						c.ViewHeader,
-						null,
-						State.SelectedItem_MarkupTreeView?.DataContext as MarkupElement,
+						"graphql schema",
+						group,//State.SelectedItem_MarkupTreeView?.DataContext as MarkupElement,
 						false
 					);
 				}
@@ -480,16 +485,16 @@ namespace Land.Control
 
 				watch = System.Diagnostics.Stopwatch.StartNew();
 
-				var list = GetGoResolvers(pFile, gqls).OfType<ExistingConcernPointCandidate>();
+				var list = GetGoResolvers(pFile, gqls);//.OfType<ExistingConcernPointCandidate>();
 				foreach (var c in list)
 				{
 					MarkupManager.AddConcernPoint(
-						c.Node,
+						(c as ExistingConcernPointCandidate).Node,
 						null,
 						pFile,
 						c.ViewHeader,
 						null,
-						State.SelectedItem_MarkupTreeView?.DataContext as MarkupElement,
+						groups[c.NormalizedName],
 						false
 					);
 				}
@@ -760,11 +765,12 @@ namespace Land.Control
 
 
 		/// <summary>
-		///  Кандидаты (пока что) на резолверы
+		///  Кандидаты (пока что) на резолверы. Reciever -> go func
 		/// </summary>
-		public List<ConcernPointCandidate> GetGoResolvers(ParsedFile file, Dictionary<string, List<ConcernPointCandidate>> graphqls)
+		public List<ConcernPointCandidate> GetGoResolvers(
+			ParsedFile file, Dictionary<string, List<ConcernPointCandidate>> graphqls)
 		{
-			var list = new List<ConcernPointCandidate>();
+			var res = new List<ConcernPointCandidate>();
 			var nodes = MarkupManager.GetGoNodes(file.Root);
 			var types = GetGoTypes(nodes.Types);
 			var cands = GetGoResolverCandidates(nodes.Funcs, types, graphqls);
@@ -784,10 +790,11 @@ namespace Land.Control
 					}
 				}
 				var c = (ConcernPointCandidate)new ExistingConcernPointCandidate(max.Node);
-				list.Add(c);
+				c.NormalizedName = max.Name;
+				res.Add(c);
 			}
 
-			return list;
+			return res;
 		}
 		/// <summary>
 		/// Кандидаты на резолверы (у кого есть аргумент struct)
