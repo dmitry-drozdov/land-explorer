@@ -109,6 +109,7 @@
   <ItemGroup>
     <Compile Include="ControlPartial\Tabs\RelationTab.cs" />
     <Compile Include="Helpers\SettingsSerializer.cs" />
+    <Compile Include="Models\Durations.cs" />
     <Compile Include="Models\GoNodes.cs" />
     <Compile Include="Models\GoType.cs" />
     <Compile Include="Models\ParserInfo.cs" />

@@ -12,6 +12,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Windows;
@@ -426,17 +427,17 @@ namespace Land.Control
 		private void Fill()
 		{
 			var gqlFiles = Editor.GetAllFiles("graphql");
-			long parsedTime = 0;
-			long addConcernTime = 0;
 
 			var gqls = new Dictionary<string, List<ConcernPointCandidate>>();
 			var groups = new Dictionary<string, Concern>(); // functionality name -> group (concern) in markup
 
+			var d = new Durations();
+
 			foreach (var file in gqlFiles)
 			{
-				var watch = System.Diagnostics.Stopwatch.StartNew();
-
+				d.Start();
 				var pFile = LogFunction(() => GetParsed(file), true, false);
+				d.Stop(ref d.ParseGraphql);
 
 				if (pFile == null)
 				{
@@ -444,12 +445,8 @@ namespace Land.Control
 					continue;
 				}
 
-				watch.Stop();
-				parsedTime += watch.ElapsedMilliseconds;
 
-
-				watch = System.Diagnostics.Stopwatch.StartNew();
-
+				d.Start();
 				var list = GetGraphqlFuncs(pFile, gqls).OfType<ExistingConcernPointCandidate>();
 				foreach (var c in list)
 				{
@@ -467,11 +464,9 @@ namespace Land.Control
 						false
 					);
 				}
-				watch.Stop();
-				addConcernTime += watch.ElapsedMilliseconds;
+				d.Stop(ref d.AddGraphqlConcern);
 			}
 
-			SetStatus($"parsed time: {parsedTime} ms., add concern time: {addConcernTime} ms.", ControlStatus.Success);
 
 			SWF.MessageBox.Show("looking for go resolvers...");
 
@@ -483,15 +478,22 @@ namespace Land.Control
 			var funcsPerReciever = new Dictionary<string, int>();
 			var funcsPerPackage = new Dictionary<string, int>();
 
+
 			foreach (var file in goFiles)
 			{
+				d.Start();
 				var pFile = LogFunction(() => GetParsed(file), true, false);
+				d.Stop(ref d.ParseGo);
 
+				d.Start();
 				VisitGoResolvers(pFile, gqls, resolvers, funcsPerReciever, funcsPerPackage);
+				d.Stop(ref d.VisitGo);
 			}
+
 
 			int weigth(GoFuncNode node) { return funcsPerReciever[node.Reciever] + funcsPerPackage[node.Package]; }
 
+			d.Start();
 			foreach (var item in resolvers)
 			{
 				var max = item.Value[0];
@@ -518,6 +520,10 @@ namespace Land.Control
 						false
 				);
 			}
+			d.Stop(ref d.AddGoConcern);
+
+			SetStatus(d.ToString(), ControlStatus.Success);
+
 
 
 			// debug
