@@ -357,9 +357,9 @@ namespace Land.Markup
 		/// <summary>
 		/// Получение всех типов, объявленных в graphql
 		/// </summary>
-		public LinkedList<Node> GetGraphqlFuncNodes(Node root)
+		public GraphqlNodes GetGraphqlFuncNodes(Node root)
 		{
-			var pointCandidates = new LinkedList<Node>();
+			var pointCandidates = new GraphqlNodes(new LinkedList<Node>(), new LinkedList<Node>());
 
 			if (root == null)
 			{
@@ -376,7 +376,11 @@ namespace Land.Markup
 				{
 					if (def.ToString() == "func_line")
 					{
-						pointCandidates.AddFirst(def);
+						pointCandidates.Funcs.AddFirst(def);
+					}
+					if (def.ToString() == "type_line")
+					{
+						pointCandidates.Types.AddFirst(def);
 					}
 				}
 			}
@@ -1083,6 +1087,18 @@ namespace Land.Markup
 		public LinkedList<Node> Types { get; set; }
 
 		public GoNodes(LinkedList<Node> Funcs, LinkedList<Node> Types)
+		{
+			this.Funcs = Funcs;
+			this.Types = Types;
+		}
+	}
+
+	public class GraphqlNodes
+	{
+		public LinkedList<Node> Funcs { get; set; }
+		public LinkedList<Node> Types { get; set; } // including functions without args
+
+		public GraphqlNodes(LinkedList<Node> Funcs, LinkedList<Node> Types)
 		{
 			this.Funcs = Funcs;
 			this.Types = Types;

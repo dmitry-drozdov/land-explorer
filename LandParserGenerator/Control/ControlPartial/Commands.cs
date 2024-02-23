@@ -428,7 +428,8 @@ namespace Land.Control
 		{
 			var gqlFiles = Editor.GetAllFiles("graphql");
 
-			var gqls = new Dictionary<string, List<ConcernPointCandidate>>();
+			var gqlFuncs = new Dictionary<string, List<ConcernPointCandidate>>();
+			var gqlTypes = new Dictionary<string, List<ConcernPointCandidate>>();
 			var groups = new Dictionary<string, Concern>(); // functionality name -> group (concern) in markup
 
 			var d = new ResourceStats();
@@ -447,8 +448,8 @@ namespace Land.Control
 
 
 				d.Start();
-				var list = GetGraphqlFuncs(pFile, gqls).OfType<ExistingConcernPointCandidate>();
-				foreach (var c in list)
+				var funcsAndTypes = GetGraphqlFuncsAndTypes(pFile, gqlFuncs, gqlTypes);
+				foreach (var c in funcsAndTypes.Funcs.OfType<ExistingConcernPointCandidate>())
 				{
 					var name = c.Node.Children.First().ToString();
 					var group = MarkupManager.AddConcern(name);
@@ -472,15 +473,18 @@ namespace Land.Control
 			}
 
 
-			//SWF.MessageBox.Show("looking for go resolvers...");
+			SWF.MessageBox.Show("looking for go resolvers...");
 
 			var goFiles = Editor.GetAllFiles("go");
 
-			//SWF.MessageBox.Show($"looking for go resolvers ({goFiles.Count()} files)...");
+			SWF.MessageBox.Show($"looking for go resolvers ({goFiles.Count()} files)...");
 
 			var resolvers = new Dictionary<GoFuncNode, List<GoFuncNode>>();
+			var resolversDoubt = new Dictionary<GoFuncNode, List<GoFuncNode>>(); // функции без аргументов и поля типа (надо оставить первых)
 			var funcsPerReciever = new Dictionary<string, int>();
 			var funcsPerPackage = new Dictionary<string, int>();
+
+			var usedRecievers = new HashSet<string>(); // какие классы в итоге использовались
 
 
 			foreach (var file in goFiles)
@@ -490,10 +494,11 @@ namespace Land.Control
 				d.Stop(ref d.ParseGo);
 
 				d.Start();
-				VisitGoResolvers(pFile, gqls, resolvers, funcsPerReciever, funcsPerPackage);
+				VisitGoResolvers(pFile, gqlFuncs, gqlTypes, resolvers, resolversDoubt, funcsPerReciever, funcsPerPackage);
 				d.Stop(ref d.VisitGo);
 			}
 
+			SWF.MessageBox.Show($"matching ({resolvers.Count()} resolvers)...");
 
 			int weigth(GoFuncNode node) { return funcsPerReciever[node.Reciever] + funcsPerPackage[node.Package]; }
 
@@ -511,6 +516,7 @@ namespace Land.Control
 						maxN = weigth(r);
 					}
 				}
+				usedRecievers.Add(max.Reciever);
 				var c = (ConcernPointCandidate)new ExistingConcernPointCandidate(max.Node);
 				c.NormalizedName = max.Name;
 
@@ -524,22 +530,46 @@ namespace Land.Control
 						false
 				);
 			}
+
+			SWF.MessageBox.Show($"matching ({resolversDoubt.Count()} resolversDoubt)...");
+
+			foreach (var item in resolversDoubt)
+			{
+				var cand = item.Value[0];
+				if (!usedRecievers.Contains(cand.Reciever)) continue;
+
+				var c = (ConcernPointCandidate)new ExistingConcernPointCandidate(cand.Node);
+				c.NormalizedName = cand.Name;
+
+				var name = cand.Node.Children.First().ToString();
+				var group = MarkupManager.AddConcern(name);
+
+				MarkupManager.AddConcernPoint(
+						(c as ExistingConcernPointCandidate).Node,
+						null,
+						cand.ParsedFile,
+						c.ViewHeader,
+						null,
+						group,
+						false
+				);
+			}
+
 			d.Stop(ref d.AddGoConcern);
 
 			SetStatus(d.ToString(), ControlStatus.Success);
 
 
-
 			// debug
 			var bad = 0;
-			foreach (var group in groups)
+			/*foreach (var group in groups)
 			{
 				if (group.Value.Elements.Count == 2)
 				{
 					group.Value.Name = "";
 				}
 				else bad++;
-			}
+			}*/
 			//SetStatus($"bad concerns: {bad}", ControlStatus.Success);
 		}
 
@@ -779,24 +809,34 @@ namespace Land.Control
 			SetStatus("Разметка загружена", ControlStatus.Success);
 		}
 
-		public List<ConcernPointCandidate> GetGraphqlFuncs(ParsedFile file, Dictionary<string, List<ConcernPointCandidate>> dictionary)
+		public GraphqlConcernPointCandidates GetGraphqlFuncsAndTypes(
+			ParsedFile file,
+			Dictionary<string, List<ConcernPointCandidate>> gqlFuncs,
+			Dictionary<string, List<ConcernPointCandidate>> gqlTypes)
 		{
-			var list = new List<ConcernPointCandidate>();
 			var nodes = MarkupManager.GetGraphqlFuncNodes(file.Root);
-			foreach (var item in nodes)
+			var listFuncs = new List<ConcernPointCandidate>(nodes.Funcs.Count);
+			foreach (var item in nodes.Funcs)
 			{
 				var c = (ConcernPointCandidate)new ExistingConcernPointCandidate(item);
-				list.Add(c);
-				if (dictionary.TryGetValue(c.NormalizedName, out var candidates))
-				{
+				listFuncs.Add(c);
+				if (gqlFuncs.TryGetValue(c.NormalizedName, out var candidates))
 					candidates.Add(c);
-				}
 				else
-				{
-					dictionary.Add(c.NormalizedName, new List<ConcernPointCandidate>() { c });
-				}
+					gqlFuncs.Add(c.NormalizedName, new List<ConcernPointCandidate>() { c });
 			}
-			return list;
+
+			var listTypes = new List<ConcernPointCandidate>(nodes.Types.Count);
+			foreach (var item in nodes.Types)
+			{
+				var c = (ConcernPointCandidate)new ExistingConcernPointCandidate(item);
+				listTypes.Add(c);
+				if (gqlTypes.TryGetValue(c.NormalizedName, out var candidates))
+					candidates.Add(c);
+				else
+					gqlTypes.Add(c.NormalizedName, new List<ConcernPointCandidate>() { c });
+			}
+			return new GraphqlConcernPointCandidates(listFuncs, listTypes);
 		}
 
 
@@ -805,25 +845,29 @@ namespace Land.Control
 		/// </summary>
 		public void VisitGoResolvers(
 			ParsedFile file,
-			Dictionary<string, List<ConcernPointCandidate>> graphqls,
-			Dictionary<GoFuncNode, List<GoFuncNode>> res,
+			Dictionary<string, List<ConcernPointCandidate>> graphqlFuncs,
+			Dictionary<string, List<ConcernPointCandidate>> graphqlTypes,
+			Dictionary<GoFuncNode, List<GoFuncNode>> resFuncs,
+			Dictionary<GoFuncNode, List<GoFuncNode>> resTypes,
 			Dictionary<string, int> funcsPerReciever, // функции-тезки с разными резолверами
 			Dictionary<string, int> funcsPerPackage
 			)
 		{
 			var nodes = MarkupManager.GetGoNodes(file.Root);
 			var types = GetGoTypes(nodes.Types);
-			VisitGoResolverCandidates(file, nodes.Funcs, types, graphqls, res, funcsPerReciever, funcsPerPackage);
+			VisitGoResolverCandidates(file, nodes.Funcs, types, graphqlFuncs, graphqlTypes, resFuncs, resTypes, funcsPerReciever, funcsPerPackage);
 		}
 		/// <summary>
 		/// Кандидаты на резолверы (у кого есть аргумент struct)
 		/// </summary>
-		public (Dictionary<GoFuncNode, List<GoFuncNode>>, Dictionary<string, int>) VisitGoResolverCandidates(
+		public void VisitGoResolverCandidates(
 			ParsedFile file,
 			LinkedList<Node> nodes,
 			Dictionary<string, GoTypeNode> goTypes,
-			Dictionary<string, List<ConcernPointCandidate>> graphqls,
-			Dictionary<GoFuncNode, List<GoFuncNode>> res,
+			Dictionary<string, List<ConcernPointCandidate>> graphqlFuncs,
+			Dictionary<string, List<ConcernPointCandidate>> graphqlTypes,
+			Dictionary<GoFuncNode, List<GoFuncNode>> resFuncs,
+			Dictionary<GoFuncNode, List<GoFuncNode>> resTypes,
 			Dictionary<string, int> funcsPerReciever, // функции-тезки с разными резолверами
 			Dictionary<string, int> funcsPerPackage // функции-тезки с разными резолверами
 			)
@@ -847,17 +891,22 @@ namespace Land.Control
 				// f_name
 				child = nextChild();
 				var name = child.ToString().Replace("f_name: ", "").Replace("_", "").ToLower();
-				if (!graphqls.ContainsKey(name)) continue;
+
+				var (isFunc, isType) = (graphqlFuncs.ContainsKey(name), graphqlTypes.ContainsKey(name));
+				if (!isFunc && !isType) continue;
 
 				// f_args
 				child = nextChild();
 				var args = child.Children.Where(x => x.ToString().StartsWith("f_arg: "));
 
 				var weight = 0;
+				if (isType && args.Count() > 1) continue;
 
 				switch (args.Count())
 				{
-					case 0: continue;
+					case 0:
+						if (isFunc) continue;
+						break;
 					case 1:
 					case 2:
 						weight = 2;
@@ -893,6 +942,15 @@ namespace Land.Control
 
 				candidate = new GoFuncNode(file, node, reciver, package, name);
 
+				if (isType)
+				{
+					if (resTypes.TryGetValue(candidate, out var types))
+						types.Add(candidate);
+					else
+						resTypes.Add(candidate, new List<GoFuncNode>() { candidate });
+					continue; // doesn't consider types in weights 
+				}
+
 
 				if (funcsPerReciever.TryGetValue(reciver, out _))
 					funcsPerReciever[reciver] += weight;
@@ -904,12 +962,11 @@ namespace Land.Control
 				else
 					funcsPerPackage.Add(package, weight);
 
-				if (res.TryGetValue(candidate, out var funcs))
+				if (resFuncs.TryGetValue(candidate, out var funcs))
 					funcs.Add(candidate);
 				else
-					res.Add(candidate, new List<GoFuncNode>() { candidate });
+					resFuncs.Add(candidate, new List<GoFuncNode>() { candidate });
 			}
-			return (res, funcsPerReciever);
 		}
 
 		/// <summary>
