@@ -414,7 +414,7 @@ namespace Land.Control
 
 				SetStatus("Вычисление разметки...", ControlStatus.Success);
 
-				SWF.MessageBox.Show("Вычисление разметки...");
+				//SWF.MessageBox.Show("Вычисление разметки...");
 
 				Fill();
 			}
@@ -431,7 +431,7 @@ namespace Land.Control
 			var gqls = new Dictionary<string, List<ConcernPointCandidate>>();
 			var groups = new Dictionary<string, Concern>(); // functionality name -> group (concern) in markup
 
-			var d = new Durations();
+			var d = new ResourceStats();
 
 			foreach (var file in gqlFiles)
 			{
@@ -452,7 +452,11 @@ namespace Land.Control
 				{
 					var name = c.Node.Children.First().ToString();
 					var group = MarkupManager.AddConcern(name);
-					groups.Add(name.ToLower().Replace("id: ", ""), group);
+					var groupName = name.ToLower().Replace("id: ", "");
+					if (!groups.ContainsKey(groupName))
+					{
+						groups.Add(groupName, group);
+					}
 
 					MarkupManager.AddConcernPoint(
 						c.Node,
@@ -468,11 +472,11 @@ namespace Land.Control
 			}
 
 
-			SWF.MessageBox.Show("looking for go resolvers...");
+			//SWF.MessageBox.Show("looking for go resolvers...");
 
 			var goFiles = Editor.GetAllFiles("go");
 
-			SWF.MessageBox.Show($"looking for go resolvers ({goFiles.Count()} files)...");
+			//SWF.MessageBox.Show($"looking for go resolvers ({goFiles.Count()} files)...");
 
 			var resolvers = new Dictionary<GoFuncNode, List<GoFuncNode>>();
 			var funcsPerReciever = new Dictionary<string, int>();
@@ -527,7 +531,7 @@ namespace Land.Control
 
 
 			// debug
-			/*var bad = 0;
+			var bad = 0;
 			foreach (var group in groups)
 			{
 				if (group.Value.Elements.Count == 2)
@@ -536,7 +540,7 @@ namespace Land.Control
 				}
 				else bad++;
 			}
-			SetStatus($"bad concerns: {bad}", ControlStatus.Success);*/
+			//SetStatus($"bad concerns: {bad}", ControlStatus.Success);
 		}
 
 		private void Command_Highlight_Executed(object sender, RoutedEventArgs e)
