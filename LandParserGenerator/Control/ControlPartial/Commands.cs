@@ -15,6 +15,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -958,7 +959,7 @@ namespace Land.Control
 
 				candidate = new GoFuncNode(file, node, reciver, package, name);
 
-				if (isType)
+				if (isType && !isFunc)
 				{
 					if (resTypes.TryGetValue(candidate, out var types))
 						types.Add(candidate);
