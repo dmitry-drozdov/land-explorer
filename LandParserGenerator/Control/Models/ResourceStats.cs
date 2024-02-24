@@ -12,12 +12,16 @@ namespace Land.Control.Models
 	{
 		public float ParseGraphql;
 		public float AddGraphqlConcern;
-		public float ParseGo;
+		public float ParseGoTotal;
+		public float ParseGoPre;
+		public float ParseGoMain;
+		public float ParseGoPost;
 		public float VisitGo;
 		public float AddGoConcern;
 		private Stopwatch watch;
 		private long maxMemoryUsage = 0;
 		private long initialMemory = 0;
+
 		public void Start()
 		{
 			watch = Stopwatch.StartNew();
@@ -39,7 +43,8 @@ namespace Land.Control.Models
 		public override string ToString()
 		{
 			return $"graphql [parse: {Format(ParseGraphql)}, add concern: {Format(AddGraphqlConcern)}] " +
-				$"go [parse {Format(ParseGo)}, visit {Format(VisitGo)}, add concern {Format(AddGoConcern)}] " +
+				$"go [parse {Format(ParseGoTotal)}={Format(ParseGoPre)}+{Format(ParseGoMain)}+{Format(ParseGoPost)}, " +
+					$"visit {Format(VisitGo)}, add concern {Format(AddGoConcern)}] " +
 				$"[{(maxMemoryUsage - initialMemory) / (1024 * 1024)}]";
 		}
 
@@ -51,6 +56,5 @@ namespace Land.Control.Models
 			}
 			return $"{val / 1000: 0.00} s";
 		}
-
 	}
 }

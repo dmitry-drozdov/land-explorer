@@ -487,12 +487,12 @@ namespace Land.Control
 
 			var usedRecievers = new HashSet<string>(); // какие классы в итоге использовались
 
-
+			ParsedFiles.Clear(); // debug
 			foreach (var file in goFiles)
 			{
 				d.Start();
-				var pFile = LogFunction(() => GetParsed(file), true, false);
-				d.Stop(ref d.ParseGo);
+				var pFile = LogFunction(() => GetParsed(file, d), true, false);
+				d.Stop(ref d.ParseGoTotal);
 
 				d.Start();
 				VisitGoResolvers(pFile, gqlFuncs, gqlTypes, resolvers, resolversDoubt, funcsPerReciever, funcsPerPackage);

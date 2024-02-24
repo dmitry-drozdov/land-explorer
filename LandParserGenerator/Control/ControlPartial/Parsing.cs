@@ -12,6 +12,7 @@ using Land.Markup;
 using Land.Markup.Binding;
 using Land.Markup.CoreExtension;
 using System.ComponentModel;
+using Land.Control.Models;
 
 namespace Land.Control
 {
@@ -34,13 +35,18 @@ namespace Land.Control
 
 		private ParsedFile GetParsed(string documentName)
 		{
+			return GetParsed(documentName, null);
+		}
+
+		private ParsedFile GetParsed(string documentName, ResourceStats d)
+		{
 			return !String.IsNullOrEmpty(documentName)
 				/// Если связанный с точкой файл разбирали и он не изменился с прошлого разбора,
 				? ParsedFiles.ContainsKey(documentName) && ParsedFiles[documentName] != null
 					/// возвращаем сохранённый ранее результат
 					? ParsedFiles[documentName]
 					/// иначе пытаемся переразобрать файл
-					: ParsedFiles[documentName] = TryParse(documentName, null, out bool success)
+					: ParsedFiles[documentName] = TryParse(documentName, null, out bool success, false, d)
 				: null;
 		}
 
@@ -52,7 +58,7 @@ namespace Land.Control
 		/// <param name="success">Признак успешности выполнения операции</param>
 		/// <param name="dryRun">Признак того, что нужно выполнить все пре- и пост- операции, кроме самого парсинга</param>
 		/// <returns></returns>
-		private ParsedFile TryParse(string fileName, string text, out bool success, bool dryRun = false)
+		private ParsedFile TryParse(string fileName, string text, out bool success, bool dryRun = false, ResourceStats d = null)
 		{
 			if (!String.IsNullOrEmpty(fileName))
 			{
@@ -65,14 +71,22 @@ namespace Land.Control
 
 					Core.Parsing.Tree.Node root = null;
 
-					if(dryRun)
+					if (dryRun)
 					{
 						root = null;
 						success = true;
 					}
 					else
 					{
-						root = Parsers[extension].Parse(text);
+						var parseRes = Parsers[extension].Parse(text, false);
+						root = parseRes.Item1;
+						var d1 = parseRes.Item2;
+						if (d != null)
+						{
+							d.ParseGoPre += d1.ParseGoPre;
+							d.ParseGoMain += d1.ParseGoMain;
+							d.ParseGoPost += d1.ParseGoPost;
+						}
 						success = Parsers[extension].Log.All(l => l.Type != MessageType.Error);
 
 						Parsers[extension].Log.ForEach(l => l.FileName = fileName);
