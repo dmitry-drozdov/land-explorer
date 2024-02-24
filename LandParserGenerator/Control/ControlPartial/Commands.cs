@@ -538,10 +538,12 @@ namespace Land.Control
 				var cand = item.Value[0];
 				if (!usedRecievers.Contains(cand.Reciever)) continue;
 
+				// посчитать есть ли контекст и сколько строк в функции
+
 				var c = (ConcernPointCandidate)new ExistingConcernPointCandidate(cand.Node);
 				c.NormalizedName = cand.Name;
 
-				var name = cand.Node.Children.First().ToString();
+				var name = cand.Node.Children[2].ToString();
 				var group = MarkupManager.AddConcern(name);
 
 				MarkupManager.AddConcernPoint(
@@ -553,6 +555,20 @@ namespace Land.Control
 						group,
 						false
 				);
+
+				var funcName = name.Replace("f_name: ", "").Replace("_", "").ToLower();
+				var schemaLine = gqlTypes[funcName];
+				var cSchema = schemaLine[0];
+
+				/*MarkupManager.AddConcernPoint(
+						(cSchema as ExistingConcernPointCandidate).Node,
+						null,
+						cand.ParsedFile,
+						cSchema.ViewHeader,
+						null,
+						group,
+						false
+				);*/
 			}
 
 			d.Stop(ref d.AddGoConcern);
@@ -900,7 +916,7 @@ namespace Land.Control
 				var args = child.Children.Where(x => x.ToString().StartsWith("f_arg: "));
 
 				var weight = 0;
-				if (isType && args.Count() > 1) continue;
+				if (isType && args.Count() != 1) continue; // type having ctx arg is func
 
 				switch (args.Count())
 				{
