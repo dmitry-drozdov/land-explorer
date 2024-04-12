@@ -240,7 +240,7 @@ namespace Land.VisualStudioExtension
 
 		public IEnumerable<string> GetAllFiles(string ext)
 		{
-			return Directory.EnumerateFiles(WorkingDirectory ?? @"e:\phd\test_repos\backend", $"*.{ext}", SearchOption.AllDirectories).
+			return Directory.EnumerateFiles(WorkingDirectory ?? @"e:\phd\test_repos\chainlink", $"*.{ext}", SearchOption.AllDirectories).
 				Where(x => !x.Contains(@"\vendor\"));
 		}
 

@@ -487,12 +487,14 @@ namespace Land.Control
 
 			var usedRecievers = new HashSet<string>(); // какие классы в итоге использовались
 
+			Stopwatch watch;
 			ParsedFiles.Clear(); // debug
 			foreach (var file in goFiles)
 			{
-				d.Start();
-				var pFile = LogFunction(() => GetParsed(file, d), true, false);
-				d.Stop(ref d.ParseGoTotal);
+				watch = Stopwatch.StartNew();
+				var pFile = GetParsed(file, d);//LogFunction(() => GetParsed(file), true, false);
+				watch.Stop();
+				d.ParseGoTotal += watch.ElapsedMilliseconds;
 
 				d.Start();
 				VisitGoResolvers(pFile, gqlFuncs, gqlTypes, resolvers, resolversDoubt, funcsPerReciever, funcsPerPackage);

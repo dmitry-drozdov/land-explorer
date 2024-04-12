@@ -35,7 +35,7 @@ namespace Land.Control
 			{
 				return Message.Error(
 					$"При загрузке библиотеки парсера {settings.ParserPath} " +
-						$"для расширения {settings.ExtensionsString} произошла ошибка:{Environment.NewLine}{e.ToString()}",
+						$"для расширения {settings.ExtensionsString} произошла ошибка:{Environment.NewLine}{e.StackTrace.ToString()}",
 					null
 				);
 			}
