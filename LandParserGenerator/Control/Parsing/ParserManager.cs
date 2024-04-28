@@ -51,7 +51,7 @@ namespace Land.Control
 					/// Если кеш обновился или парсер до этого не загружали
 					if (response.CacheRefreshed || existingDomain == null)
 					{
-						var libraryDomain = AppDomain.CreateDomain(parserItem.Id.ToString());
+						var libraryDomain = AppDomain.CurrentDomain;
 						var loader = (ParserLoader)libraryDomain.CreateInstanceAndUnwrap(
 							typeof(ParserLoader).Assembly.FullName,
 							typeof(ParserLoader).FullName
