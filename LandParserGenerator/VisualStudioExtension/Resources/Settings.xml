@@ -18,6 +18,26 @@
 				</PreprocessorProperty>
 			</PreprocessorProperties>
 		</ParserSettingsItem>
+    <ParserSettingsItem>
+      <Extensions xmlns:a="http://schemas.microsoft.com/2003/10/Serialization/Arrays">
+        <a:string>.go</a:string>
+      </Extensions>
+      <ParserDependencies xmlns:a="http://schemas.microsoft.com/2003/10/Serialization/Arrays"/>
+      <ParserPath>.\Libraries\Go\golang.dll</ParserPath>
+      <PreprocessorDependencies xmlns:a="http://schemas.microsoft.com/2003/10/Serialization/Arrays"/>
+      <PreprocessorPath>.\Libraries\Go\GoPreprocessing.ConditionalCompilation.dll</PreprocessorPath>
+      <PreprocessorProperties/>
+    </ParserSettingsItem>
+    <ParserSettingsItem>
+      <Extensions xmlns:a="http://schemas.microsoft.com/2003/10/Serialization/Arrays">
+        <a:string>.graphql</a:string>
+      </Extensions>
+      <ParserDependencies xmlns:a="http://schemas.microsoft.com/2003/10/Serialization/Arrays"/>
+      <ParserPath>.\Libraries\Graphql\graphql.dll</ParserPath>
+      <PreprocessorDependencies xmlns:a="http://schemas.microsoft.com/2003/10/Serialization/Arrays"/>
+      <PreprocessorPath i:nil="true"/>
+      <PreprocessorProperties/>
+    </ParserSettingsItem>
 		<ParserSettingsItem>
 			<Extensions xmlns:a="http://schemas.microsoft.com/2003/10/Serialization/Arrays">
 				<a:string>.md</a:string>
