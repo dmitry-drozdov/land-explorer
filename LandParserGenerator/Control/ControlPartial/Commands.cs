@@ -563,15 +563,15 @@ namespace Land.Control
 				var schemaLine = gqlTypes[funcName];
 				var cSchema = schemaLine[0];
 
-				/*MarkupManager.AddConcernPoint(
+				MarkupManager.AddConcernPoint(
 						(cSchema as ExistingConcernPointCandidate).Node,
 						null,
-						cand.ParsedFile,
+						cSchema.ParsedFile,
 						cSchema.ViewHeader,
 						null,
 						group,
 						false
-				);*/
+				);
 			}
 
 			d.Stop(ref d.AddGoConcern);
@@ -837,7 +837,7 @@ namespace Land.Control
 			var listFuncs = new List<ConcernPointCandidate>(nodes.Funcs.Count);
 			foreach (var item in nodes.Funcs)
 			{
-				var c = (ConcernPointCandidate)new ExistingConcernPointCandidate(item);
+				var c = (ConcernPointCandidate)new ExistingConcernPointCandidate(item, file);
 				listFuncs.Add(c);
 				if (gqlFuncs.TryGetValue(c.NormalizedName, out var candidates))
 					candidates.Add(c);
@@ -848,7 +848,7 @@ namespace Land.Control
 			var listTypes = new List<ConcernPointCandidate>(nodes.Types.Count);
 			foreach (var item in nodes.Types)
 			{
-				var c = (ConcernPointCandidate)new ExistingConcernPointCandidate(item);
+				var c = (ConcernPointCandidate)new ExistingConcernPointCandidate(item, file);
 				listTypes.Add(c);
 				if (gqlTypes.TryGetValue(c.NormalizedName, out var candidates))
 					candidates.Add(c);

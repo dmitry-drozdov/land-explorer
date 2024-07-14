@@ -1008,6 +1008,7 @@ namespace Land.Markup.Binding
 
 			/// Спускаемся от родителя и собираем первые в глубину потомки-острова
 			siblings = new List<Node>(ancestor.Children);
+
 			for (var i = 0; i < siblings.Count; ++i)
 			{
 				if (!siblings[i].Options.IsSet(MarkupOption.GROUP_NAME, MarkupOption.LAND))

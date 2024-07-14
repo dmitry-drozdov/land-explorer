@@ -4,12 +4,14 @@ using System.Linq;
 
 using Land.Core;
 using Land.Core.Parsing.Tree;
+using Land.Markup;
 using Land.Markup.Binding;
 
 namespace Land.Control
 {
 	public abstract class ConcernPointCandidate
 	{
+		public ParsedFile ParsedFile { get; set; }
 		public string ViewHeader { get; set; }
 
 		public string NormalizedName { get; set; }
@@ -33,8 +35,9 @@ namespace Land.Control
 
 		public ExistingConcernPointCandidate() { }
 
-		public ExistingConcernPointCandidate(Node node)
+		public ExistingConcernPointCandidate(Node node, ParsedFile parsedFile = null)
 		{
+			ParsedFile = parsedFile;
 			Node = node;
 			ViewHeader = $"{node.Type}: {String.Join(" ", PointContext.GetHeaderContext(node).Sequence_old)}";
 			NormalizedName = ToString().
