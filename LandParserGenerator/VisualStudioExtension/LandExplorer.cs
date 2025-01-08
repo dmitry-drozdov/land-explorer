@@ -49,12 +49,14 @@ namespace Land.VisualStudioExtension
 		protected override void OnCreate()
 		{
 			PresentationTraceSources.DataBindingSource.Switch.Level = SourceLevels.Critical;
+			PresentationTraceSources.ResourceDictionarySource.Switch.Level = SourceLevels.Critical;
 			base.OnCreate();
 		}
 
 		protected override void Initialize()
 		{
 			PresentationTraceSources.DataBindingSource.Switch.Level = SourceLevels.Critical;
+			PresentationTraceSources.ResourceDictionarySource.Switch.Level = SourceLevels.Critical;
 			base.Initialize();
 		}
 

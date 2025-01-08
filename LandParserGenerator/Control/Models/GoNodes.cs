@@ -16,6 +16,8 @@ namespace Land.Control.Models
 		public string Reciever { get; set; }
 		public string Package { get; set; }
 		public string Name { get; set; }
+		public float Score { get; set; }
+		public float NScore => Score / 4.0f;
 		public GoFuncNode(ParsedFile file, Node node, string reciever, string package, string name)
 		{
 			ParsedFile = file;

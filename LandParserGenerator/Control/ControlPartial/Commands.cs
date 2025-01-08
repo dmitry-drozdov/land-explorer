@@ -488,7 +488,7 @@ namespace Land.Control
 			var usedRecievers = new HashSet<string>(); // какие классы в итоге использовались
 
 			Stopwatch watch;
-			ParsedFiles.Clear(); // debug
+
 			foreach (var file in goFiles)
 			{
 				watch = Stopwatch.StartNew();
@@ -505,9 +505,31 @@ namespace Land.Control
 
 
 			d.Start();
+			foreach (var items in resolvers)
+			{
+				foreach (var item in items.Value)
+				{
+					if (item.Reciever.ToLower().Contains("resolver"))
+					{
+						item.Score += 0.5f;
+						Debug("RN+");
+					}
+					if (item.Name.ToLower().Contains("resolver"))
+					{
+						item.Score += 0.5f;
+						Debug("FN+");
+					}
+					if (items.Value.Count == 1)
+					{
+						item.Score += 1;
+						Debug("U+");
+					}
+				}
+			}
+
 			foreach (var item in resolvers)
 			{
-				var max = item.Value[0];
+				var max = item.Value.OrderByDescending(x=>x.Score).First();
 				usedRecievers.Add(max.Reciever);
 				var c = (ConcernPointCandidate)new ExistingConcernPointCandidate(max.Node);
 				c.NormalizedName = max.Name;
@@ -516,7 +538,7 @@ namespace Land.Control
 						(c as ExistingConcernPointCandidate).Node,
 						null,
 						max.ParsedFile,
-						c.ViewHeader,
+						c.ViewHeader + max.NScore.ToString("0.00"),
 						null,
 						groups[c.NormalizedName],
 						false
@@ -998,7 +1020,7 @@ namespace Land.Control
 
 		private void Debug(string msg)
 		{
-			System.Diagnostics.Debug.WriteLine("🔔 " + msg);
+			System.Diagnostics.Debug.WriteLine("LOG🔔 " + msg);
 		}
 
 		/// <summary>
