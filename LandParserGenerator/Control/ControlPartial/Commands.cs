@@ -473,12 +473,12 @@ namespace Land.Control
 				d.Stop(ref d.AddGraphqlConcern);
 			}
 
-
-			SWF.MessageBox.Show("looking for go resolvers...");
+			Debug($"got {gqlFuncs.Count} gql functions");
+			Debug("looking for go resolvers...");
 
 			var goFiles = Editor.GetAllFiles("go");
 
-			SWF.MessageBox.Show($"looking for go resolvers ({goFiles.Count()} files)...");
+			Debug($"looking for go resolvers ({goFiles.Count()} files)...");
 
 			var resolvers = new Dictionary<GoFuncNode, List<GoFuncNode>>();
 			var resolversDoubt = new Dictionary<GoFuncNode, List<GoFuncNode>>(); // функции без аргументов и поля типа (надо оставить первых)
@@ -497,28 +497,17 @@ namespace Land.Control
 				d.ParseGoTotal += watch.ElapsedMilliseconds;
 
 				d.Start();
-				VisitGoResolvers(pFile, gqlFuncs, gqlTypes, resolvers, resolversDoubt, funcsPerReciever, funcsPerPackage);
+				VisitGoResolversV2(pFile, gqlFuncs, resolvers);
 				d.Stop(ref d.VisitGo);
 			}
 
-			SWF.MessageBox.Show($"matching ({resolvers.Count()} resolvers)...");
+			Debug($"matching ({resolvers.Count()} resolvers)...");
 
-			int weigth(GoFuncNode node) { return funcsPerReciever[node.Reciever] + funcsPerPackage[node.Package]; }
 
 			d.Start();
 			foreach (var item in resolvers)
 			{
 				var max = item.Value[0];
-				var maxN = weigth(max);
-				// ищем функцию, которая принадлежит классу и пакету с наибольшим количество функций, подходящих нам
-				foreach (var r in item.Value)
-				{
-					if (weigth(r) > maxN)
-					{
-						max = r;
-						maxN = weigth(r);
-					}
-				}
 				usedRecievers.Add(max.Reciever);
 				var c = (ConcernPointCandidate)new ExistingConcernPointCandidate(max.Node);
 				c.NormalizedName = max.Name;
@@ -534,45 +523,6 @@ namespace Land.Control
 				);
 			}
 
-			SWF.MessageBox.Show($"matching ({resolversDoubt.Count()} resolversDoubt)...");
-
-			foreach (var item in resolversDoubt)
-			{
-				var cand = item.Value[0];
-				if (!usedRecievers.Contains(cand.Reciever)) continue;
-
-				// посчитать есть ли контекст и сколько строк в функции
-
-				var c = (ConcernPointCandidate)new ExistingConcernPointCandidate(cand.Node);
-				c.NormalizedName = cand.Name;
-
-				var name = cand.Node.Children[2].ToString();
-				var group = MarkupManager.AddConcern(name);
-
-				MarkupManager.AddConcernPoint(
-						(c as ExistingConcernPointCandidate).Node,
-						null,
-						cand.ParsedFile,
-						c.ViewHeader,
-						null,
-						group,
-						false
-				);
-
-				var funcName = name.Replace("f_name: ", "").Replace("_", "").ToLower();
-				var schemaLine = gqlTypes[funcName];
-				var cSchema = schemaLine[0];
-
-				MarkupManager.AddConcernPoint(
-						(cSchema as ExistingConcernPointCandidate).Node,
-						null,
-						cSchema.ParsedFile,
-						cSchema.ViewHeader,
-						null,
-						group,
-						false
-				);
-			}
 
 			d.Stop(ref d.AddGoConcern);
 
@@ -986,6 +936,69 @@ namespace Land.Control
 				else
 					resFuncs.Add(candidate, new List<GoFuncNode>() { candidate });
 			}
+		}
+
+		public void VisitGoResolversV2(
+			ParsedFile file,
+			Dictionary<string, List<ConcernPointCandidate>> graphqlFuncs,
+			Dictionary<GoFuncNode, List<GoFuncNode>> resFuncs
+			)
+		{
+			var nodes = MarkupManager.GetGoNodes(file.Root);
+			var types = GetGoTypes(nodes.Types);
+			VisitGoResolverCandidatesV2(file, nodes.Funcs, types, graphqlFuncs, resFuncs);
+		}
+
+		public void VisitGoResolverCandidatesV2(
+			ParsedFile file,
+			LinkedList<Node> nodes,
+			Dictionary<string, GoTypeNode> goTypes,
+			Dictionary<string, List<ConcernPointCandidate>> graphqlFuncs,
+			Dictionary<GoFuncNode, List<GoFuncNode>> resFuncs
+			)
+		{
+			var package = file.Root.Children[1].Children[0].ToString().Replace("ID: ", "");
+			foreach (var node in nodes)
+			{
+				var candidate = (GoFuncNode)null;
+
+				// func, f_reciever, f_name, f_args, f_returns
+
+				var idx = 1;
+				Node nextChild() { return node.Children[idx++]; }
+
+				// f_reciever
+				var child = nextChild();
+				if (child.ToString() != "f_reciever" || child.Children.Count() == 0) continue;
+				var reciver = child.Children.Last().Children.First().ToString().Replace("ID: ", "");
+
+
+				// f_name
+				child = nextChild();
+				var name = child.ToString().Replace("f_name: ", "").Replace("_", "").ToLower();
+
+				if (!graphqlFuncs.ContainsKey(name))
+				{
+					continue;
+				}
+				candidate = new GoFuncNode(file, node, reciver, package, name);
+
+				if (resFuncs.TryGetValue(candidate, out var funcs))
+				{
+					Debug($"Add new candidate {name}");
+					funcs.Add(candidate);
+				}
+				else
+				{
+					Debug($"Add one more candidate {name}");
+					resFuncs.Add(candidate, new List<GoFuncNode>() { candidate });
+				}
+			}
+		}
+
+		private void Debug(string msg)
+		{
+			System.Diagnostics.Debug.WriteLine("🔔 " + msg);
 		}
 
 		/// <summary>

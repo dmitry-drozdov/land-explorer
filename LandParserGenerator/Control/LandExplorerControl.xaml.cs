@@ -20,6 +20,7 @@ using System.ComponentModel;
 using System.Runtime.Serialization;
 using System.Text;
 using Land.Control.Properties;
+using System.Diagnostics;
 
 namespace Land.Control
 {
@@ -171,6 +172,9 @@ namespace Land.Control
 
         public void Initialize(IEditorAdapter adapter, string settingsFilePath = null)
 		{
+			// Отключаем лишние логи
+			PresentationTraceSources.DataBindingSource.Switch.Level = SourceLevels.Critical;
+
 			Editor = adapter;
 			Editor.RegisterOnDocumentChanged(DocumentChangedHandler);
 

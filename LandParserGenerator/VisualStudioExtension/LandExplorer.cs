@@ -4,7 +4,9 @@ using Land.VisualStudioExtension.Listeners;
 namespace Land.VisualStudioExtension
 {
 	using System;
+	using System.Diagnostics;
 	using System.Runtime.InteropServices;
+	using System.Threading;
 	using System.Windows;
 	using Microsoft.VisualStudio;
 	using Microsoft.VisualStudio.Shell;
@@ -36,18 +38,30 @@ namespace Land.VisualStudioExtension
 			var control = new LandExplorerControl();
 			var adapter = new EditorAdapter();
 
-			var path = System.IO.Path.GetDirectoryName(
-                System.Reflection.Assembly.GetExecutingAssembly().Location
-            );
+			var path = System.IO.Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
 
-            control.Initialize(adapter, $"{path}/Resources/Settings.xml");
+
+			control.Initialize(adapter, $"{path}/Resources/Settings.xml");
 
 			this.Content = Control = control;
 		}
 
+		protected override void OnCreate()
+		{
+			PresentationTraceSources.DataBindingSource.Switch.Level = SourceLevels.Critical;
+			base.OnCreate();
+		}
+
+		protected override void Initialize()
+		{
+			PresentationTraceSources.DataBindingSource.Switch.Level = SourceLevels.Critical;
+			base.Initialize();
+		}
+
+
 		public int OnClose(ref uint pgrfSaveOptions)
 		{
-			if(this.Control.HasUnsavedChanges)
+			if (this.Control.HasUnsavedChanges)
 			{
 				switch (MessageBox.Show(
 					"Сохранить изменения текущей разметки?",
@@ -61,7 +75,7 @@ namespace Land.VisualStudioExtension
 					case MessageBoxResult.Cancel:
 						return VSConstants.E_ABORT;
 				}
-				
+
 			}
 
 			return VSConstants.S_OK;
