@@ -52,6 +52,18 @@ namespace Land.Control
 				: null;*/
 		}
 
+		private ParsedFile ParseFragment(string parserCode, string sourceFileName, string text)
+		{
+			var parser = Parsers[parserCode];
+			var node = parser.Parse(text, false).Item1;
+			return new ParsedFile
+			{
+				Name = sourceFileName,
+				Root = node,
+				Text = text,
+			};
+		}
+
 		/// <summary>
 		/// Попытка распарсить заданный файл
 		/// </summary>
@@ -92,7 +104,7 @@ namespace Land.Control
 						{
 							d.ParseGoTotalLib += d1.Duration;
 						}
-						
+
 
 						d?.Start();
 						success = Parsers[extension].Log.All(l => l.Type != MessageType.Error);
@@ -100,7 +112,7 @@ namespace Land.Control
 						Log.AddRange(Parsers[extension].Log);
 						d?.Stop(ref d.ParseGoLog);
 					}
-						
+
 					return success ? new ParsedFile
 					{
 						Root = root,
