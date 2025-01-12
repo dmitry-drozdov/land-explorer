@@ -63,4 +63,6 @@ namespace Land.Control.Models
 		public LinkedList<GoFuncNode> Funcs { get; set; }
 		public LinkedList<GoTypeNode> Types { get; set; }
 	}
+
+
 }

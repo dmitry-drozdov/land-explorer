@@ -410,6 +410,48 @@ namespace Land.Control
 			VisitGoResolverCandidatesV2(file, nodes.Funcs, types, graphqlFuncs, graphqlTypes, resolvers, potentialResolvers);
 		}
 
+		public int VisitGoResolverBodyCalls(Node root)
+		{
+			if (root == null)
+			{
+				return 0;
+			}
+			var res = 0;
+			if (root.ToString() == "call")
+			{
+				res++;
+			}
+			foreach (var child in root.Children)
+			{
+				res += VisitGoResolverBodyCalls(child);
+			}
+			return res;
+		}
+		public (int, int) VisitGoResolverBodyControls(Node root)
+		{
+			if (root == null)
+			{
+				return (0, 0);
+			}
+			var anonCalls = 0;
+			var controls = 0;
+			if (root.ToString() == "anon_func_call")
+			{
+				anonCalls++;
+			}
+			if (root.ToString() == "if" || root.ToString() == "for" || root.ToString() == "switch" || root.ToString() == "select")
+			{
+				controls++;
+			}
+			foreach (var child in root.Children)
+			{
+				var tmp = VisitGoResolverBodyControls(child);
+				anonCalls += tmp.Item1;
+				controls += tmp.Item2;
+			}
+			return (anonCalls, controls);
+		}
+
 		public void VisitGoResolverCandidatesV2(
 			ParsedFile file,
 			LinkedList<Node> nodes,
@@ -423,7 +465,7 @@ namespace Land.Control
 			var package = file.Root.Children[1].Children[0].ToString().Replace("ID: ", "");
 			foreach (var node in nodes)
 			{
-
+				//node
 				// func, f_reciever, f_name, f_args, f_returns
 
 				var idx = 1;
@@ -431,13 +473,40 @@ namespace Land.Control
 
 				// f_reciever
 				var child = nextChild();
-				if (child.ToString() != "f_reciever" || child.Children.Count() == 0) continue;
+				if (child.ToString() != "f_reciever" || child.Children.Count() == 0)
+					continue;
 				var reciver = child.Children.Last().Children.First().ToString().Replace("ID: ", "");
 
 
 				// f_name
 				child = nextChild();
 				var name = child.ToString().Replace("f_name: ", "").Replace("_", "").ToLower();
+
+				if (!graphqlFuncs.ContainsKey(name) && !graphqlTypes.ContainsKey(name))
+				{
+					continue;
+				}
+
+
+				idx += 3;
+				var l = node.Children[idx].Location;
+				var txt = file.Text.Substring(l.Start.Offset, l.End.Offset - l.Start.Offset + 1);
+
+				var parsedFileCalls = ParseFragment(".pure_calls", file.Name, txt);
+				var callsCnt = VisitGoResolverBodyCalls(parsedFileCalls.Root);
+
+				var parsedFileControls = ParseFragment(".controls", file.Name, txt);
+				var controlsCntRes = VisitGoResolverBodyControls(parsedFileControls.Root);
+				callsCnt += controlsCntRes.Item1;
+
+				var controlsCnt = controlsCntRes.Item2;
+
+				if (callsCnt + controlsCnt == 0)
+				{
+					Debug($"non-trivial resolver {name}");
+					continue;
+				}
+				
 
 				if (graphqlFuncs.ContainsKey(name))
 				{
