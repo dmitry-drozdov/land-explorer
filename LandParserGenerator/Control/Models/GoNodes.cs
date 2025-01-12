@@ -35,6 +35,11 @@ namespace Land.Control.Models
 			return Equals(obj as GoFuncNode);
 		}
 
+		public override string ToString()
+		{
+			return $"{Package}.{Reciever}.{Name}";
+		}
+
 		public bool Equals(GoFuncNode obj)
 		{
 			return obj != null &&

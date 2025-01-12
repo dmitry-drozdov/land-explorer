@@ -21,6 +21,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Xml;
 using System.Xml.Linq;
+using static System.Net.WebRequestMethods;
 using SWF = System.Windows.Forms;
 
 #pragma warning disable CA1031 // Do not catch general exception types
@@ -432,6 +433,7 @@ namespace Land.Control
 			var gqlFuncs = new Dictionary<string, List<ConcernPointCandidate>>();
 			var gqlTypes = new Dictionary<string, List<ConcernPointCandidate>>();
 			var groups = new Dictionary<string, Concern>(); // functionality name -> group (concern) in markup
+			var gqlTypesConcernCandidate = new Dictionary<string, ExistingConcernPointCandidate>();
 
 			var d = new ResourceStats();
 
@@ -470,6 +472,16 @@ namespace Land.Control
 						false
 					);
 				}
+
+				foreach (var c in funcsAndTypes.Types.OfType<ExistingConcernPointCandidate>())
+				{
+					var name = c.Node.Children.First().ToString();
+					var groupName = name.ToLower().Replace("id: ", "");
+					if (!gqlTypesConcernCandidate.ContainsKey(groupName))
+					{
+						gqlTypesConcernCandidate.Add(groupName, c);
+					}
+				}
 				d.Stop(ref d.AddGraphqlConcern);
 			}
 
@@ -481,31 +493,30 @@ namespace Land.Control
 			Debug($"looking for go resolvers ({goFiles.Count()} files)...");
 
 			var resolvers = new Dictionary<GoFuncNode, List<GoFuncNode>>();
-			var resolversDoubt = new Dictionary<GoFuncNode, List<GoFuncNode>>(); // функции без аргументов и поля типа (надо оставить первых)
-			var funcsPerReciever = new Dictionary<string, int>();
-			var funcsPerPackage = new Dictionary<string, int>();
-
-			var usedRecievers = new HashSet<string>(); // какие классы в итоге использовались
+			var potentialResolvers = new Dictionary<GoFuncNode, List<GoFuncNode>>();
 
 			Stopwatch watch;
 
 			foreach (var file in goFiles)
 			{
 				watch = Stopwatch.StartNew();
-				var pFile = GetParsed(file, d);//LogFunction(() => GetParsed(file), true, false);
+				var pFile = GetParsed(file, d);
 				watch.Stop();
 				d.ParseGoTotal += watch.ElapsedMilliseconds;
 
 				d.Start();
-				VisitGoResolversV2(pFile, gqlFuncs, resolvers);
+				VisitGoResolversV2(pFile, gqlFuncs, gqlTypes, resolvers, potentialResolvers);
 				d.Stop(ref d.VisitGo);
 			}
 
+			Debug($"got {potentialResolvers.Count()} potential resolvers");
 			Debug($"matching ({resolvers.Count()} resolvers)...");
 
 
 			d.Start();
-			foreach (var items in resolvers)
+
+
+			void estimate(KeyValuePair<GoFuncNode, List<GoFuncNode>> items)
 			{
 				foreach (var item in items.Value)
 				{
@@ -526,13 +537,24 @@ namespace Land.Control
 					}
 				}
 			}
+			foreach (var items in resolvers)
+			{
+				estimate(items);
+			}
+			foreach (var items in potentialResolvers)
+			{
+				estimate(items);
+			}
 
+			var resolversPerReciever = new Dictionary<string, int>();
 			foreach (var item in resolvers)
 			{
-				var max = item.Value.OrderByDescending(x=>x.Score).First();
-				usedRecievers.Add(max.Reciever);
+				var max = item.Value.OrderByDescending(x => x.Score).First();
 				var c = (ConcernPointCandidate)new ExistingConcernPointCandidate(max.Node);
 				c.NormalizedName = max.Name;
+
+				resolversPerReciever.TryGetValue(max.Reciever, out var cnt);
+				resolversPerReciever[max.Reciever] = cnt + 1;
 
 				MarkupManager.AddConcernPoint(
 						(c as ExistingConcernPointCandidate).Node,
@@ -544,6 +566,48 @@ namespace Land.Control
 						false
 				);
 			}
+
+			foreach (var item in potentialResolvers)
+			{
+				var max = item.Value.Where(x => resolversPerReciever.ContainsKey(x.Reciever) && resolversPerReciever[x.Reciever] > 1).
+					OrderByDescending(x => x.Score).
+					FirstOrDefault();
+
+				if (max == null)
+					continue;
+
+				Debug($"found potential resolver {max}");
+
+				var c = new ExistingConcernPointCandidate(max.Node);
+				c.NormalizedName = max.Name;
+
+				var name = c.NormalizedName;
+				var group = MarkupManager.AddConcern(name);
+				// adding golang
+				MarkupManager.AddConcernPoint(
+						c.Node,
+						null,
+						max.ParsedFile,
+						c.ViewHeader + max.NScore.ToString("0.00"),
+						null,
+						group,
+						false
+				);
+
+				c = gqlTypesConcernCandidate[name];
+				//adding gql
+				MarkupManager.AddConcernPoint(
+						c.Node,
+						null,
+						c.ParsedFile,
+						c.ViewHeader,
+						"graphql schema",
+						group,
+						false
+				);
+			}
+
+
 
 
 			d.Stop(ref d.AddGoConcern);
@@ -963,12 +1027,14 @@ namespace Land.Control
 		public void VisitGoResolversV2(
 			ParsedFile file,
 			Dictionary<string, List<ConcernPointCandidate>> graphqlFuncs,
-			Dictionary<GoFuncNode, List<GoFuncNode>> resFuncs
+			Dictionary<string, List<ConcernPointCandidate>> graphqlTypes,
+			Dictionary<GoFuncNode, List<GoFuncNode>> resolvers,
+			Dictionary<GoFuncNode, List<GoFuncNode>> potentialResolvers
 			)
 		{
 			var nodes = MarkupManager.GetGoNodes(file.Root);
 			var types = GetGoTypes(nodes.Types);
-			VisitGoResolverCandidatesV2(file, nodes.Funcs, types, graphqlFuncs, resFuncs);
+			VisitGoResolverCandidatesV2(file, nodes.Funcs, types, graphqlFuncs, graphqlTypes, resolvers, potentialResolvers);
 		}
 
 		public void VisitGoResolverCandidatesV2(
@@ -976,13 +1042,14 @@ namespace Land.Control
 			LinkedList<Node> nodes,
 			Dictionary<string, GoTypeNode> goTypes,
 			Dictionary<string, List<ConcernPointCandidate>> graphqlFuncs,
-			Dictionary<GoFuncNode, List<GoFuncNode>> resFuncs
+			Dictionary<string, List<ConcernPointCandidate>> graphqlTypes,
+			Dictionary<GoFuncNode, List<GoFuncNode>> resolvers,
+			Dictionary<GoFuncNode, List<GoFuncNode>> potentialResolvers
 			)
 		{
 			var package = file.Root.Children[1].Children[0].ToString().Replace("ID: ", "");
 			foreach (var node in nodes)
 			{
-				var candidate = (GoFuncNode)null;
 
 				// func, f_reciever, f_name, f_args, f_returns
 
@@ -999,22 +1066,37 @@ namespace Land.Control
 				child = nextChild();
 				var name = child.ToString().Replace("f_name: ", "").Replace("_", "").ToLower();
 
-				if (!graphqlFuncs.ContainsKey(name))
+				if (graphqlFuncs.ContainsKey(name))
 				{
+					var candidate = new GoFuncNode(file, node, reciver, package, name);
+					if (resolvers.TryGetValue(candidate, out var funcs))
+					{
+						Debug($"Add new resolver {name} for reciever {package}.{reciver}");
+						funcs.Add(candidate);
+					}
+					else
+					{
+						Debug($"Add one more resolver {name} for reciever {package}.{reciver}");
+						resolvers.Add(candidate, new List<GoFuncNode>() { candidate });
+					}
 					continue;
 				}
-				candidate = new GoFuncNode(file, node, reciver, package, name);
+				if (graphqlTypes.ContainsKey(name))
+				{
+					var candidate = new GoFuncNode(file, node, reciver, package, name);
+					if (potentialResolvers.TryGetValue(candidate, out var funcs))
+					{
+						Debug($"Add new potential resolver {name} for reciever {package}.{reciver}");
+						funcs.Add(candidate);
+					}
+					else
+					{
+						Debug($"Add one more potential resolver {name} for reciever {package}.{reciver}");
+						potentialResolvers.Add(candidate, new List<GoFuncNode>() { candidate });
+					}
+					continue;
+				}
 
-				if (resFuncs.TryGetValue(candidate, out var funcs))
-				{
-					Debug($"Add new candidate {name}");
-					funcs.Add(candidate);
-				}
-				else
-				{
-					Debug($"Add one more candidate {name}");
-					resFuncs.Add(candidate, new List<GoFuncNode>() { candidate });
-				}
 			}
 		}
 
