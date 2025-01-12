@@ -16,15 +16,19 @@ namespace Land.Control.Models
 		public string Reciever { get; set; }
 		public string Package { get; set; }
 		public string Name { get; set; }
-		public float Score { get; set; }
-		public float NScore => Score / 4.0f;
-		public GoFuncNode(ParsedFile file, Node node, string reciever, string package, string name)
+		public double Score { get; set; }
+		public double NScore => Score / 4.0;
+		public int CallsCnt { get; set; } = 0;
+		public int ControlsCnt { get; set; } = 0;
+		public GoFuncNode(ParsedFile file, Node node, string reciever, string package, string name, int callsCnt ,int controlsCnt)
 		{
 			ParsedFile = file;
 			Node = node;
 			Reciever = reciever;
 			Package = package;
 			Name = name;
+			CallsCnt= callsCnt;
+			ControlsCnt = controlsCnt;
 		}
 		public override int GetHashCode()
 		{
@@ -63,6 +67,8 @@ namespace Land.Control.Models
 		public LinkedList<GoFuncNode> Funcs { get; set; }
 		public LinkedList<GoTypeNode> Types { get; set; }
 	}
+
+
 
 
 }

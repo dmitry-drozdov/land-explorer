@@ -99,6 +99,7 @@ namespace Land.Control
 
 			var resolvers = new Dictionary<GoFuncNode, List<GoFuncNode>>();
 			var potentialResolvers = new Dictionary<GoFuncNode, List<GoFuncNode>>();
+			var maxCallsPerResolver = new Dictionary<string, int>();
 
 			Stopwatch watch;
 
@@ -110,12 +111,14 @@ namespace Land.Control
 				d.ParseGoTotal += watch.ElapsedMilliseconds;
 
 				d.Start();
-				VisitGoResolversV2(pFile, gqlFuncs, gqlTypes, resolvers, potentialResolvers);
+				VisitGoResolversV2(pFile, gqlFuncs, gqlTypes, resolvers, potentialResolvers, maxCallsPerResolver);
 				d.Stop(ref d.VisitGo);
 			}
 
 			Debug($"got {potentialResolvers.Count()} potential resolvers");
 			Debug($"matching ({resolvers.Count()} resolvers)...");
+
+			var avgMaxCallsPerResolver = maxCallsPerResolver.Values.Average();
 
 
 			d.Start();
@@ -127,19 +130,20 @@ namespace Land.Control
 				{
 					if (item.Reciever.ToLower().Contains("resolver"))
 					{
-						item.Score += 0.5f;
-						Debug("RN+");
+						item.Score += 0.5;
 					}
 					if (item.Name.ToLower().Contains("resolver"))
 					{
-						item.Score += 0.5f;
-						Debug("FN+");
+						item.Score += 0.5;
 					}
 					if (items.Value.Count == 1)
 					{
 						item.Score += 1;
-						Debug("U+");
 					}
+
+					var m = Math.Min(Math.Max((avgMaxCallsPerResolver - item.CallsCnt) / avgMaxCallsPerResolver, 0), 1) / 4;
+					Debug($"{m}");
+					item.Score += m;
 				}
 			}
 			foreach (var items in resolvers)
@@ -368,7 +372,7 @@ namespace Land.Control
 				child = nextChild();
 				if (child.Children.Count() == 0) continue;
 
-				candidate = new GoFuncNode(file, node, reciver, package, name);
+				candidate = new GoFuncNode(file, node, reciver, package, name, 0, 0);
 
 				if (isType && !isFunc)
 				{
@@ -402,12 +406,13 @@ namespace Land.Control
 			Dictionary<string, List<ConcernPointCandidate>> graphqlFuncs,
 			Dictionary<string, List<ConcernPointCandidate>> graphqlTypes,
 			Dictionary<GoFuncNode, List<GoFuncNode>> resolvers,
-			Dictionary<GoFuncNode, List<GoFuncNode>> potentialResolvers
+			Dictionary<GoFuncNode, List<GoFuncNode>> potentialResolvers,
+			Dictionary<string, int> maxCallsPerResolver
 			)
 		{
 			var nodes = MarkupManager.GetGoNodes(file.Root);
 			var types = GetGoTypes(nodes.Types);
-			VisitGoResolverCandidatesV2(file, nodes.Funcs, types, graphqlFuncs, graphqlTypes, resolvers, potentialResolvers);
+			VisitGoResolverCandidatesV2(file, nodes.Funcs, types, graphqlFuncs, graphqlTypes, resolvers, potentialResolvers, maxCallsPerResolver);
 		}
 
 		public int VisitGoResolverBodyCalls(Node root)
@@ -459,14 +464,15 @@ namespace Land.Control
 			Dictionary<string, List<ConcernPointCandidate>> graphqlFuncs,
 			Dictionary<string, List<ConcernPointCandidate>> graphqlTypes,
 			Dictionary<GoFuncNode, List<GoFuncNode>> resolvers,
-			Dictionary<GoFuncNode, List<GoFuncNode>> potentialResolvers
+			Dictionary<GoFuncNode, List<GoFuncNode>> potentialResolvers,
+			Dictionary<string, int> maxCallsPerResolver
 			)
 		{
 			var package = file.Root.Children[1].Children[0].ToString().Replace("ID: ", "");
 			foreach (var node in nodes)
 			{
 				//node
-				// func, f_reciever, f_name, f_args, f_returns
+				// func, f_reciever, f_name, f_args, f_returns, { body }
 
 				var idx = 1;
 				Node nextChild() { return node.Children[idx++]; }
@@ -488,6 +494,7 @@ namespace Land.Control
 				}
 
 
+				// body
 				idx += 3;
 				var l = node.Children[idx].Location;
 				var txt = file.Text.Substring(l.Start.Offset, l.End.Offset - l.Start.Offset + 1);
@@ -506,11 +513,17 @@ namespace Land.Control
 					Debug($"non-trivial resolver {name}");
 					continue;
 				}
-				
+
+				maxCallsPerResolver.TryGetValue(reciver, out int val);
+				if (callsCnt > val)
+				{
+					maxCallsPerResolver[reciver] = callsCnt;
+				}
+
 
 				if (graphqlFuncs.ContainsKey(name))
 				{
-					var candidate = new GoFuncNode(file, node, reciver, package, name);
+					var candidate = new GoFuncNode(file, node, reciver, package, name, callsCnt, controlsCnt);
 					if (resolvers.TryGetValue(candidate, out var funcs))
 					{
 						Debug($"Add new resolver {name} for reciever {package}.{reciver}");
@@ -525,7 +538,7 @@ namespace Land.Control
 				}
 				if (graphqlTypes.ContainsKey(name))
 				{
-					var candidate = new GoFuncNode(file, node, reciver, package, name);
+					var candidate = new GoFuncNode(file, node, reciver, package, name, callsCnt, controlsCnt);
 					if (potentialResolvers.TryGetValue(candidate, out var funcs))
 					{
 						Debug($"Add new potential resolver {name} for reciever {package}.{reciver}");
