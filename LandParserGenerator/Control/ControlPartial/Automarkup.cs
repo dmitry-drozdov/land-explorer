@@ -141,7 +141,7 @@ namespace Land.Control
 						item.Score += 1;
 					}
 
-					var m = Math.Min(Math.Max((avgMaxCallsPerResolver - item.CallsCnt) / avgMaxCallsPerResolver, 0), 1) / 4;
+					var m = Math.Min(Math.Max(1 - item.CallsCnt / avgMaxCallsPerResolver, 0), 1) / 4;
 					Debug($"{m}");
 					item.Score += m;
 				}
@@ -432,6 +432,51 @@ namespace Land.Control
 			}
 			return res;
 		}
+
+		public int VisitGoResolverBodyMockCalls(Node root)
+		{
+			if (root == null)
+			{
+				return 0;
+			}
+
+			var res = 0;
+			foreach (var child in root.Children)
+			{
+				if (child.ToString() == "call")
+				{
+					// мы учитываем только те идентификаторы Call/Called/Get, что были найдены внутри вызова (call)
+					res += visitGoResolverBodyMockCalls(child);
+				}
+				else
+				{
+					res += VisitGoResolverBodyMockCalls(child);
+				}
+			}
+			return res;
+		}
+
+		public int visitGoResolverBodyMockCalls(Node root)
+		{
+			if (root == null)
+			{
+				return 0;
+			}
+
+			var callId = root.ToString().ToLower();
+			if (callId == "id: get" || callId == "id: call" || callId == "id: called")
+			{
+				return 1;
+			}
+
+			var res = 0;
+			foreach (var child in root.Children)
+			{
+				res += visitGoResolverBodyMockCalls(child);
+			}
+			return res;
+		}
+
 		public (int, int) VisitGoResolverBodyControls(Node root)
 		{
 			if (root == null)
@@ -513,6 +558,8 @@ namespace Land.Control
 					Debug($"non-trivial resolver {name}");
 					continue;
 				}
+
+				Debug($"mock calls {VisitGoResolverBodyMockCalls(parsedFileCalls.Root)} {name}");
 
 				maxCallsPerResolver.TryGetValue(reciver, out int val);
 				if (callsCnt > val)
