@@ -20,15 +20,17 @@ namespace Land.Control.Models
 		public double NScore => Score / 4.0;
 		public int CallsCnt { get; set; } = 0;
 		public int ControlsCnt { get; set; } = 0;
-		public GoFuncNode(ParsedFile file, Node node, string reciever, string package, string name, int callsCnt ,int controlsCnt)
+		public int MockCallsCnt { get; set; } = 0;
+		public GoFuncNode(ParsedFile file, Node node, string reciever, string package, string name, int callsCnt, int controlsCnt, int mockCallsCnt)
 		{
 			ParsedFile = file;
 			Node = node;
 			Reciever = reciever;
 			Package = package;
 			Name = name;
-			CallsCnt= callsCnt;
+			CallsCnt = callsCnt;
 			ControlsCnt = controlsCnt;
+			MockCallsCnt = mockCallsCnt;
 		}
 		public override int GetHashCode()
 		{

@@ -142,8 +142,19 @@ namespace Land.Control
 					}
 
 					var m = Math.Min(Math.Max(1 - item.CallsCnt / avgMaxCallsPerResolver, 0), 1) / 4;
-					Debug($"{m}");
 					item.Score += m;
+
+					double m2 = 0;
+					if (item.MockCallsCnt == 0 || item.CallsCnt == 0)
+					{
+						m2 = 1;
+					}
+					else
+					{
+						m2 = 1 - item.MockCallsCnt / (double)item.CallsCnt;
+					}
+					item.Score += m2;
+					Debug($"{m2}");
 				}
 			}
 			foreach (var items in resolvers)
@@ -372,7 +383,7 @@ namespace Land.Control
 				child = nextChild();
 				if (child.Children.Count() == 0) continue;
 
-				candidate = new GoFuncNode(file, node, reciver, package, name, 0, 0);
+				candidate = new GoFuncNode(file, node, reciver, package, name, 0, 0, 0);
 
 				if (isType && !isFunc)
 				{
@@ -547,10 +558,11 @@ namespace Land.Control
 				var parsedFileCalls = ParseFragment(".pure_calls", file.Name, txt);
 				var callsCnt = VisitGoResolverBodyCalls(parsedFileCalls.Root);
 
+				var mockCalls = VisitGoResolverBodyMockCalls(parsedFileCalls.Root);
+
 				var parsedFileControls = ParseFragment(".controls", file.Name, txt);
 				var controlsCntRes = VisitGoResolverBodyControls(parsedFileControls.Root);
 				callsCnt += controlsCntRes.Item1;
-
 				var controlsCnt = controlsCntRes.Item2;
 
 				if (callsCnt + controlsCnt == 0)
@@ -559,7 +571,6 @@ namespace Land.Control
 					continue;
 				}
 
-				Debug($"mock calls {VisitGoResolverBodyMockCalls(parsedFileCalls.Root)} {name}");
 
 				maxCallsPerResolver.TryGetValue(reciver, out int val);
 				if (callsCnt > val)
@@ -570,7 +581,7 @@ namespace Land.Control
 
 				if (graphqlFuncs.ContainsKey(name))
 				{
-					var candidate = new GoFuncNode(file, node, reciver, package, name, callsCnt, controlsCnt);
+					var candidate = new GoFuncNode(file, node, reciver, package, name, callsCnt, controlsCnt, mockCalls);
 					if (resolvers.TryGetValue(candidate, out var funcs))
 					{
 						Debug($"Add new resolver {name} for reciever {package}.{reciver}");
@@ -585,7 +596,7 @@ namespace Land.Control
 				}
 				if (graphqlTypes.ContainsKey(name))
 				{
-					var candidate = new GoFuncNode(file, node, reciver, package, name, callsCnt, controlsCnt);
+					var candidate = new GoFuncNode(file, node, reciver, package, name, callsCnt, controlsCnt, mockCalls);
 					if (potentialResolvers.TryGetValue(candidate, out var funcs))
 					{
 						Debug($"Add new potential resolver {name} for reciever {package}.{reciver}");
