@@ -1060,6 +1060,23 @@ namespace Land.Markup
 				DoWithMarkupSubtree(action, elem);
 		}
 
+		public void CheckMarkup()
+		{
+			var i = 0;
+			foreach (var elem in Markup)
+			{
+				if (elem is Concern c)
+				{
+					c.Name += $" ({++i}/{Markup.Count}) ";
+					if (c.Elements.Count != 2)
+					{
+						c.Name += "<!>";
+					}
+				}
+				
+			}
+		}
+
 		/// <summary>
 		/// Совершение заданного действия со всеми элементами поддерева разметки
 		/// </summary>

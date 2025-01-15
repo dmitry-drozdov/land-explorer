@@ -37,7 +37,7 @@ namespace Land.Control
 
 			var gqlFuncs = new Dictionary<string, List<ConcernPointCandidate>>();
 			var gqlTypes = new Dictionary<string, List<ConcernPointCandidate>>();
-			var groups = new Dictionary<string, Concern>(); // functionality name -> group (concern) in markup
+			var groups = new Dictionary<string, List<Concern>>(); // functionality name -> group (concern) in markup
 			var gqlTypesConcernCandidate = new Dictionary<string, ExistingConcernPointCandidate>();
 
 			var d = new ResourceStats();
@@ -62,10 +62,11 @@ namespace Land.Control
 					var name = c.Node.Children.First().ToString();
 					var group = MarkupManager.AddConcern(name);
 					var groupName = name.ToLower().Replace("id: ", "");
-					if (!groups.ContainsKey(groupName))
-					{
-						groups.Add(groupName, group);
-					}
+
+					if (groups.TryGetValue(groupName, out var elems))
+						elems.Add(group);
+					else
+						groups.Add(groupName, new List<Concern>() { group });
 
 					MarkupManager.AddConcernPoint(
 						c.Node,
@@ -170,21 +171,29 @@ namespace Land.Control
 			foreach (var item in resolvers)
 			{
 				var max = item.Value.OrderByDescending(x => x.Score).First();
-				var c = (ConcernPointCandidate)new ExistingConcernPointCandidate(max.Node);
+				var c = (ConcernPointCandidate)new ExistingConcernPointCandidate(max.Node, max.ParsedFile);
 				c.NormalizedName = max.Name;
 
 				resolversPerReciever.TryGetValue(max.Reciever, out var cnt);
 				resolversPerReciever[max.Reciever] = cnt + 1;
 
-				MarkupManager.AddConcernPoint(
+				if (groups[c.NormalizedName].Count > 1)
+				{
+					Debug($"ambiguous func {c.NormalizedName} {groups[c.NormalizedName].Count}");
+				}
+				foreach (var group in groups[c.NormalizedName])
+				{
+					MarkupManager.AddConcernPoint(
 						(c as ExistingConcernPointCandidate).Node,
 						null,
 						max.ParsedFile,
 						c.ViewHeader + max.NScore.ToString("0.00"),
 						null,
-						groups[c.NormalizedName],
+						group,
 						false
-				);
+					);
+				}
+
 			}
 
 			foreach (var item in potentialResolvers)
@@ -228,6 +237,7 @@ namespace Land.Control
 			}
 
 
+			MarkupManager.CheckMarkup();
 
 
 			d.Stop(ref d.AddGoConcern);

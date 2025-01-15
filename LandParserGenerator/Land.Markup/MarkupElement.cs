@@ -41,5 +41,10 @@ namespace Land.Markup
 		public event PropertyChangedEventHandler PropertyChanged;
 
 		public abstract void Accept(BaseMarkupVisitor visitor);
+
+		public override string ToString()
+		{
+			return $"{Id} {Name}";
+		}
 	}
 }
