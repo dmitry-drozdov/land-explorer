@@ -21,6 +21,11 @@ namespace Land.Control.Models
 		public int CallsCnt { get; set; } = 0;
 		public int ControlsCnt { get; set; } = 0;
 		public int MockCallsCnt { get; set; } = 0;
+
+		public int NumLines()
+		{
+			return ParsedFile.Fragment(Node.Location).Split('\n').Count(y => y.Length > 5 || y.Contains("}"));
+		}
 		public GoFuncNode(ParsedFile file, Node node, string reciever, string package, string name, int callsCnt, int controlsCnt, int mockCallsCnt)
 		{
 			ParsedFile = file;

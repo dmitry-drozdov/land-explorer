@@ -9,10 +9,11 @@ using Land.Core.Parsing.Tree;
 using Land.Markup.Tree;
 using Land.Markup.Binding;
 using Land.Markup.CoreExtension;
+using System.Security.Cryptography;
 
 namespace Land.Markup
 {
-	public class ConcernPoint: MarkupElement, INotifyPropertyChanged
+	public class ConcernPoint : MarkupElement, INotifyPropertyChanged
 	{
 		private PointContext _context;
 
@@ -110,8 +111,8 @@ namespace Land.Markup
 		public ConcernPoint() { }
 
 		public ConcernPoint(
-			string name, 
-			string comment, 
+			string name,
+			string comment,
 			PointContext context,
 			SegmentLocation location,
 			LineContext line,
@@ -130,9 +131,9 @@ namespace Land.Markup
 		}
 
 		public void Relink(
-			PointContext context, 
-			SegmentLocation location, 
-			LineContext lineContext = null, 
+			PointContext context,
+			SegmentLocation location,
+			LineContext lineContext = null,
 			SegmentLocation lineLocation = null)
 		{
 			NodeLocation = location;
@@ -183,5 +184,29 @@ namespace Land.Markup
 		/// Имя файла
 		/// </summary>
 		public string Name { get; set; }
+
+		public string Fragment(SegmentLocation location)
+		{
+			return Text.Substring(location.Start.Offset, location.End.Offset - location.Start.Offset);
+		}
+
+		public override int GetHashCode()
+		{
+			return Name.GetHashCode() ^ Text.GetHashCode();
+		}
+		public override bool Equals(object obj)
+		{
+			return Equals(obj as ParsedFile);
+		}
+
+		public bool Equals(ParsedFile obj)
+		{
+			return obj != null && obj.Name == Name && obj.Text == Text;
+		}
+
+		public override string ToString()
+		{
+			return $"{Name}";
+		}
 	}
 }

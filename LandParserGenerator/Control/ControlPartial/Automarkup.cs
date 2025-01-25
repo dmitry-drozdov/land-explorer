@@ -30,6 +30,68 @@ namespace Land.Control
 {
 	public partial class LandExplorerControl : UserControl, INotifyPropertyChanged
 	{
+		private void Estimate(
+			KeyValuePair<GoFuncNode, List<GoFuncNode>> items,
+			double avgMaxCallsPerResolver,
+			Dictionary<ParsedFile, List<int>> linesPerFuncInFile
+		)
+		{
+			foreach (var item in items.Value)
+			{
+				if (item.Reciever.ToLower().Contains("resolver"))
+				{
+					//item.Score += 0.5;
+				}
+				if (item.Name.ToLower().Contains("resolver"))
+				{
+					//item.Score += 0.5;
+				}
+				if (items.Value.Count == 1)
+				{
+					item.Score += 1;
+				}
+
+				var m = Math.Min(Math.Max(1 - item.CallsCnt / avgMaxCallsPerResolver, 0), 1) / 4;
+				item.Score += m;
+
+				double m2;
+				if (item.MockCallsCnt == 0 || item.CallsCnt == 0)
+				{
+					m2 = 1;
+				}
+				else
+				{
+					m2 = 1 - item.MockCallsCnt / (double)item.CallsCnt;
+				}
+				item.Score += m2;
+
+
+				// учесть распределение по структурам
+				var numLines = item.NumLines();
+				//Debug($"{item} {numLines}");
+
+				if (linesPerFuncInFile.TryGetValue(item.ParsedFile, out List<int> value))
+				{
+					value.Add(numLines);
+				}
+				else
+				{
+					linesPerFuncInFile.Add(item.ParsedFile, new List<int> { numLines });
+				}
+			}
+		}
+
+		private void EstimateRound2(
+			KeyValuePair<GoFuncNode, List<GoFuncNode>> items,
+			Dictionary<ParsedFile, double> covariantLinesPerFuncInFile
+		)
+		{
+			foreach (var item in items.Value)
+			{
+				item.Score += 1 - covariantLinesPerFuncInFile[item.ParsedFile];
+				Debug($"{item} {1-covariantLinesPerFuncInFile[item.ParsedFile]}");
+			}
+		}
 
 		private void Fill()
 		{
@@ -123,48 +185,36 @@ namespace Land.Control
 
 
 			d.Start();
+			var linesPerFuncInFile = new Dictionary<ParsedFile, List<int>>(); // файл => кол-во строк в первой функции, кол-во строк во второй ф-и, в третьей, ...
 
 
-			void estimate(KeyValuePair<GoFuncNode, List<GoFuncNode>> items)
-			{
-				foreach (var item in items.Value)
-				{
-					if (item.Reciever.ToLower().Contains("resolver"))
-					{
-						item.Score += 0.5;
-					}
-					if (item.Name.ToLower().Contains("resolver"))
-					{
-						item.Score += 0.5;
-					}
-					if (items.Value.Count == 1)
-					{
-						item.Score += 1;
-					}
-
-					var m = Math.Min(Math.Max(1 - item.CallsCnt / avgMaxCallsPerResolver, 0), 1) / 4;
-					item.Score += m;
-
-					double m2 = 0;
-					if (item.MockCallsCnt == 0 || item.CallsCnt == 0)
-					{
-						m2 = 1;
-					}
-					else
-					{
-						m2 = 1 - item.MockCallsCnt / (double)item.CallsCnt;
-					}
-					item.Score += m2;
-					Debug($"{m2}");
-				}
-			}
 			foreach (var items in resolvers)
 			{
-				estimate(items);
+				Estimate(items, avgMaxCallsPerResolver, linesPerFuncInFile);
 			}
 			foreach (var items in potentialResolvers)
 			{
-				estimate(items);
+				Estimate(items, avgMaxCallsPerResolver, linesPerFuncInFile);
+			}
+
+			var covariantLinesPerFuncInFile = new Dictionary<ParsedFile, double>();
+			foreach (var elem in linesPerFuncInFile)
+			{
+				var vals = elem.Value;
+				var m = vals.Average();
+				var sigma = Math.Sqrt(vals.Average(x => (x - m) * (x - m)));
+				var cv = sigma / m;
+				if (cv < 0 || cv > 1) throw new Exception("covariant incorrect!");
+				covariantLinesPerFuncInFile[elem.Key] = cv;
+			}
+
+			foreach (var items in resolvers)
+			{
+				EstimateRound2(items, covariantLinesPerFuncInFile);
+			}
+			foreach (var items in potentialResolvers)
+			{
+				EstimateRound2(items, covariantLinesPerFuncInFile);
 			}
 
 			var resolversPerReciever = new Dictionary<string, int>();
