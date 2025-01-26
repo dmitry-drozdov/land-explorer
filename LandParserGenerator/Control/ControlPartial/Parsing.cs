@@ -108,6 +108,10 @@ namespace Land.Control
 
 						d?.Start();
 						success = Parsers[extension].Log.All(l => l.Type != MessageType.Error);
+						if (!success)
+						{
+							Debug($"FAILED {fileName}");
+						}
 						Parsers[extension].Log.ForEach(l => l.FileName = fileName);
 						Log.AddRange(Parsers[extension].Log);
 						d?.Stop(ref d.ParseGoLog);

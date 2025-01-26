@@ -33,18 +33,23 @@ namespace Land.Control
 		private void Estimate(
 			KeyValuePair<GoFuncNode, List<GoFuncNode>> items,
 			double avgMaxCallsPerResolver,
+			Dictionary<string, List<int>> linesPerFuncInStruct,
 			Dictionary<ParsedFile, List<int>> linesPerFuncInFile
 		)
 		{
 			foreach (var item in items.Value)
 			{
+				if (item.Reciever.ToLower().Contains("unimplemented"))
+				{
+					item.Score -= 100; // -inf
+				}
 				if (item.Reciever.ToLower().Contains("resolver"))
 				{
-					//item.Score += 0.5;
+					item.Score += 1;
 				}
 				if (item.Name.ToLower().Contains("resolver"))
 				{
-					//item.Score += 0.5;
+					item.Score += 1;
 				}
 				if (items.Value.Count == 1)
 				{
@@ -70,9 +75,18 @@ namespace Land.Control
 				var numLines = item.NumLines();
 				//Debug($"{item} {numLines}");
 
-				if (linesPerFuncInFile.TryGetValue(item.ParsedFile, out List<int> value))
+				if (linesPerFuncInStruct.TryGetValue(item.Reciever, out List<int> value))
 				{
 					value.Add(numLines);
+				}
+				else
+				{
+					linesPerFuncInStruct.Add(item.Reciever, new List<int> { numLines });
+				}
+
+				if (linesPerFuncInFile.TryGetValue(item.ParsedFile, out List<int> value2))
+				{
+					value2.Add(numLines);
 				}
 				else
 				{
@@ -83,13 +97,15 @@ namespace Land.Control
 
 		private void EstimateRound2(
 			KeyValuePair<GoFuncNode, List<GoFuncNode>> items,
+			Dictionary<string, double> covariantLinesPerFuncInStruct,
 			Dictionary<ParsedFile, double> covariantLinesPerFuncInFile
 		)
 		{
 			foreach (var item in items.Value)
 			{
-				item.Score += 1 - covariantLinesPerFuncInFile[item.ParsedFile];
-				Debug($"{item} {1-covariantLinesPerFuncInFile[item.ParsedFile]}");
+				item.Score += (1 - covariantLinesPerFuncInStruct[item.Reciever]) * 0.25;
+				item.Score += (1 - covariantLinesPerFuncInFile[item.ParsedFile]) * 0.75;
+				Debug($"{item} {1 - covariantLinesPerFuncInStruct[item.Reciever]} {1 - covariantLinesPerFuncInFile[item.ParsedFile]}");
 			}
 		}
 
@@ -185,18 +201,29 @@ namespace Land.Control
 
 
 			d.Start();
-			var linesPerFuncInFile = new Dictionary<ParsedFile, List<int>>(); // файл => кол-во строк в первой функции, кол-во строк во второй ф-и, в третьей, ...
+			var linesPerFuncInStruct = new Dictionary<string, List<int>>(); // структура => кол-во строк в первой функции, кол-во строк во второй ф-и, в третьей, ...
+			var linesPerFuncInFile = new Dictionary<ParsedFile, List<int>>(); // File => кол-во строк в первой функции, кол-во строк во второй ф-и, в третьей, ...
 
 
 			foreach (var items in resolvers)
 			{
-				Estimate(items, avgMaxCallsPerResolver, linesPerFuncInFile);
+				Estimate(items, avgMaxCallsPerResolver, linesPerFuncInStruct, linesPerFuncInFile);
 			}
 			foreach (var items in potentialResolvers)
 			{
-				Estimate(items, avgMaxCallsPerResolver, linesPerFuncInFile);
+				Estimate(items, avgMaxCallsPerResolver, linesPerFuncInStruct, linesPerFuncInFile);
 			}
 
+			var covariantLinesPerFuncInStruct = new Dictionary<string, double>();
+			foreach (var elem in linesPerFuncInStruct)
+			{
+				var vals = elem.Value;
+				var m = vals.Average();
+				var sigma = Math.Sqrt(vals.Average(x => (x - m) * (x - m)));
+				var cv = sigma / m;
+				if (cv < 0 || cv > 2) throw new Exception("covariant incorrect!");
+				covariantLinesPerFuncInStruct[elem.Key] = cv;
+			}
 			var covariantLinesPerFuncInFile = new Dictionary<ParsedFile, double>();
 			foreach (var elem in linesPerFuncInFile)
 			{
@@ -204,44 +231,47 @@ namespace Land.Control
 				var m = vals.Average();
 				var sigma = Math.Sqrt(vals.Average(x => (x - m) * (x - m)));
 				var cv = sigma / m;
-				if (cv < 0 || cv > 1) throw new Exception("covariant incorrect!");
+				if (cv < 0 || cv > 2) throw new Exception("covariant incorrect!");
 				covariantLinesPerFuncInFile[elem.Key] = cv;
 			}
 
 			foreach (var items in resolvers)
 			{
-				EstimateRound2(items, covariantLinesPerFuncInFile);
+				EstimateRound2(items, covariantLinesPerFuncInStruct, covariantLinesPerFuncInFile);
 			}
 			foreach (var items in potentialResolvers)
 			{
-				EstimateRound2(items, covariantLinesPerFuncInFile);
+				EstimateRound2(items, covariantLinesPerFuncInStruct, covariantLinesPerFuncInFile);
 			}
 
 			var resolversPerReciever = new Dictionary<string, int>();
 			foreach (var item in resolvers)
 			{
-				var max = item.Value.OrderByDescending(x => x.Score).First();
-				var c = (ConcernPointCandidate)new ExistingConcernPointCandidate(max.Node, max.ParsedFile);
-				c.NormalizedName = max.Name;
-
-				resolversPerReciever.TryGetValue(max.Reciever, out var cnt);
-				resolversPerReciever[max.Reciever] = cnt + 1;
-
-				if (groups[c.NormalizedName].Count > 1)
+				foreach (var cand in item.Value.OrderByDescending(x => x.Score))
 				{
-					Debug($"ambiguous func {c.NormalizedName} {groups[c.NormalizedName].Count}");
-				}
-				foreach (var group in groups[c.NormalizedName])
-				{
-					MarkupManager.AddConcernPoint(
-						(c as ExistingConcernPointCandidate).Node,
-						null,
-						max.ParsedFile,
-						c.ViewHeader + max.NScore.ToString("0.00"),
-						null,
-						group,
-						false
-					);
+					//var max = item.Value.OrderByDescending(x => x.Score).First();
+					var c = (ConcernPointCandidate)new ExistingConcernPointCandidate(cand.Node, cand.ParsedFile);
+					c.NormalizedName = cand.Name;
+
+					resolversPerReciever.TryGetValue(cand.Reciever, out var cnt);
+					resolversPerReciever[cand.Reciever] = cnt + 1;
+
+					if (groups[c.NormalizedName].Count > 1)
+					{
+						Debug($"ambiguous func {c.NormalizedName} {groups[c.NormalizedName].Count}");
+					}
+					foreach (var group in groups[c.NormalizedName])
+					{
+						MarkupManager.AddConcernPoint(
+							(c as ExistingConcernPointCandidate).Node,
+							null,
+							cand.ParsedFile,
+							c.ViewHeader + cand.NScore.ToString("0.00"),
+							null,
+							group,
+							false
+						);
+					}
 				}
 
 			}
@@ -267,7 +297,7 @@ namespace Land.Control
 						c.Node,
 						null,
 						max.ParsedFile,
-						c.ViewHeader + max.NScore.ToString("0.00"),
+						c.ViewHeader + "P" + max.NScore.ToString("0.00"),
 						null,
 						group,
 						false
@@ -535,7 +565,7 @@ namespace Land.Control
 			}
 
 			var callId = root.ToString().ToLower();
-			if (callId == "id: get" || callId == "id: call" || callId == "id: called")
+			if (callId == "id: get" || callId == "id: call" || callId == "id: called" || callId == "id: invoke")
 			{
 				return 1;
 			}
@@ -609,9 +639,17 @@ namespace Land.Control
 					continue;
 				}
 
+				// f_args
+				child = nextChild();
+				var args = child.Children.Where(x => x.ToString().StartsWith("f_arg: "));
+				if (args.Count() == 0)
+				{
+					continue;
+				}
+
 
 				// body
-				idx += 3;
+				idx += 2;
 				var l = node.Children[idx].Location;
 				var txt = file.Text.Substring(l.Start.Offset, l.End.Offset - l.Start.Offset + 1);
 
