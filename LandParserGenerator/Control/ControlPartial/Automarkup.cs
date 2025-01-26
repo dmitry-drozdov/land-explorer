@@ -137,9 +137,14 @@ namespace Land.Control
 				var funcsAndTypes = GetGraphqlFuncsAndTypes(pFile, gqlFuncs, gqlTypes);
 				foreach (var c in funcsAndTypes.Funcs.OfType<ExistingConcernPointCandidate>())
 				{
+					var typeName = c.Node.Parent.Children[1].ToString().ToLower().Replace("id: ", "");
+					//Debug($"belongs to {typeName}");
+
 					var name = c.Node.Children.First().ToString();
 					var group = MarkupManager.AddConcern(name);
 					var groupName = name.ToLower().Replace("id: ", "");
+
+					group.GqlTypeName = typeName;
 
 					if (groups.TryGetValue(groupName, out var elems))
 						elems.Add(group);
@@ -221,7 +226,7 @@ namespace Land.Control
 				var m = vals.Average();
 				var sigma = Math.Sqrt(vals.Average(x => (x - m) * (x - m)));
 				var cv = sigma / m;
-				if (cv < 0 || cv > 2) throw new Exception("covariant incorrect!");
+				if (cv < 0 || cv > 5) throw new Exception("covariant incorrect!");
 				covariantLinesPerFuncInStruct[elem.Key] = cv;
 			}
 			var covariantLinesPerFuncInFile = new Dictionary<ParsedFile, double>();
@@ -231,7 +236,7 @@ namespace Land.Control
 				var m = vals.Average();
 				var sigma = Math.Sqrt(vals.Average(x => (x - m) * (x - m)));
 				var cv = sigma / m;
-				if (cv < 0 || cv > 2) throw new Exception("covariant incorrect!");
+				if (cv < 0 || cv >5) throw new Exception("covariant incorrect!");
 				covariantLinesPerFuncInFile[elem.Key] = cv;
 			}
 
@@ -262,14 +267,18 @@ namespace Land.Control
 					}
 					foreach (var group in groups[c.NormalizedName])
 					{
+						var gqlTypeName = group.GqlTypeName;
+						var m = (cand.Score + (cand.Reciever.ToLower().Equals(gqlTypeName.ToLower()) ? 1 : 0)) / 4;
 						MarkupManager.AddConcernPoint(
 							(c as ExistingConcernPointCandidate).Node,
 							null,
 							cand.ParsedFile,
-							c.ViewHeader + cand.NScore.ToString("0.00"),
+							c.ViewHeader + m.ToString("0.00"),
 							null,
 							group,
-							false
+							false,
+							m// ресивер = тип в графкл => это наш кандидат
+
 						);
 					}
 				}
@@ -300,7 +309,8 @@ namespace Land.Control
 						c.ViewHeader + "P" + max.NScore.ToString("0.00"),
 						null,
 						group,
-						false
+						false,
+						max.Score / 4
 				);
 
 				c = gqlTypesConcernCandidate[name];

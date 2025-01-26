@@ -29,6 +29,8 @@ namespace Land.Markup
 			}
 		}
 
+		public double Metric { get; set; }
+
 		private LineContext _lineContext;
 
 		[JsonIgnore]
@@ -117,7 +119,8 @@ namespace Land.Markup
 			SegmentLocation location,
 			LineContext line,
 			SegmentLocation lineLocation,
-			Concern parent = null)
+			Concern parent = null,
+			double metric = 0)
 		{
 			Context = context;
 			LineContext = line;
@@ -128,6 +131,7 @@ namespace Land.Markup
 			Comment = comment;
 
 			base.PropertyChanged += ParentPropertyChanged;
+			Metric = metric;
 		}
 
 		public void Relink(

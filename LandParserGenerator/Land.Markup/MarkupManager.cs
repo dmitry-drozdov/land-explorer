@@ -192,7 +192,8 @@ namespace Land.Markup
 			string name = null,
 			string comment = null,
 			MarkupElement targetElement = null,
-			bool remap = true)
+			bool remap = true,
+			double metric = 0)
 		{
 			if (remap) Remap(node.Type, file, true);
 
@@ -229,7 +230,8 @@ namespace Land.Markup
 				node.Location,
 				lineContext,
 				line,
-				parent
+				parent,
+				metric
 			);
 
 			AddElement(point);
@@ -1072,8 +1074,9 @@ namespace Land.Markup
 					{
 						c.Name += "<!>";
 					}
+					c.Elements.Sort((x, y) => (y as ConcernPoint).Metric.CompareTo((x as ConcernPoint).Metric));
 				}
-				
+
 			}
 		}
 
@@ -1097,6 +1100,21 @@ namespace Land.Markup
 			}
 		}
 	}
+	public static class ObservableCollectionExtensions
+	{
+		public static void Sort<T>(this ObservableCollection<T> collection, Comparison<T> comparison)
+		{
+			var sortedList = collection.ToList();
+			sortedList.Sort(comparison);
+
+			collection.Clear();
+			foreach (var item in sortedList)
+			{
+				collection.Add(item);
+			}
+		}
+	}
+
 
 	public class GoNodes
 	{

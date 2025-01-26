@@ -13,6 +13,7 @@ namespace Land.Markup
 		public ObservableCollection<MarkupElement> Elements { get; set; }
 
 		public new event PropertyChangedEventHandler PropertyChanged;
+		public string GqlTypeName { get; set; }
 
 		public void ParentPropertyChanged(object sender, PropertyChangedEventArgs e)
 		{
