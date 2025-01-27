@@ -109,6 +109,15 @@ namespace Land.Control
 			}
 		}
 
+		private double CompareNames(string go, string graphql)
+		{
+			go = go.ToLower();
+			graphql = graphql.ToLower();
+			if (go == graphql) return 1;
+			if (go.Contains(graphql)) return 0.75;
+			return 0;
+		}
+
 		private void Fill()
 		{
 			var gqlFiles = Editor.GetAllFiles("graphql");
@@ -236,7 +245,7 @@ namespace Land.Control
 				var m = vals.Average();
 				var sigma = Math.Sqrt(vals.Average(x => (x - m) * (x - m)));
 				var cv = sigma / m;
-				if (cv < 0 || cv >5) throw new Exception("covariant incorrect!");
+				if (cv < 0 || cv > 5) throw new Exception("covariant incorrect!");
 				covariantLinesPerFuncInFile[elem.Key] = cv;
 			}
 
@@ -268,7 +277,7 @@ namespace Land.Control
 					foreach (var group in groups[c.NormalizedName])
 					{
 						var gqlTypeName = group.GqlTypeName;
-						var m = (cand.Score + (cand.Reciever.ToLower().Equals(gqlTypeName.ToLower()) ? 1 : 0)) / 4;
+						var m = (cand.Score + CompareNames(cand.Reciever, gqlTypeName)) / 4;
 						MarkupManager.AddConcernPoint(
 							(c as ExistingConcernPointCandidate).Node,
 							null,
@@ -642,7 +651,14 @@ namespace Land.Control
 
 				// f_name
 				child = nextChild();
-				var name = child.ToString().Replace("f_name: ", "").Replace("_", "").ToLower();
+				var name = child.ToString().Replace("f_name: ", "").Replace("_", "");
+				if (char.IsLower(name[0]))
+				{
+					// private method
+					continue;
+				}
+				name = name.ToLower();
+
 
 				if (!graphqlFuncs.ContainsKey(name) && !graphqlTypes.ContainsKey(name))
 				{
