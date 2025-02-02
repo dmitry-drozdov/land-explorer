@@ -111,10 +111,11 @@ namespace Land.Control
 
 		private double CompareNames(string go, string graphql)
 		{
+			if (char.IsLower(go[0])) return 0;
 			go = go.ToLower();
 			graphql = graphql.ToLower();
-			if (go == graphql) return 1;
-			if (go.Contains(graphql)) return 0.75;
+			if (go == graphql) return 1.5;
+			if (go.Contains(graphql)) return 1.2;
 			return 0;
 		}
 
@@ -234,8 +235,8 @@ namespace Land.Control
 				var vals = elem.Value;
 				var m = vals.Average();
 				var sigma = Math.Sqrt(vals.Average(x => (x - m) * (x - m)));
-				var cv = sigma / m;
-				if (cv < 0 || cv > 5) throw new Exception("covariant incorrect!");
+				var cv = Math.Max(sigma / m, 1);
+				if (cv < 0) throw new Exception("covariant incorrect!");
 				covariantLinesPerFuncInStruct[elem.Key] = cv;
 			}
 			var covariantLinesPerFuncInFile = new Dictionary<ParsedFile, double>();
@@ -244,8 +245,8 @@ namespace Land.Control
 				var vals = elem.Value;
 				var m = vals.Average();
 				var sigma = Math.Sqrt(vals.Average(x => (x - m) * (x - m)));
-				var cv = sigma / m;
-				if (cv < 0 || cv > 5) throw new Exception("covariant incorrect!");
+				var cv = Math.Max(sigma / m, 1);
+				if (cv < 0) throw new Exception("covariant incorrect!");
 				covariantLinesPerFuncInFile[elem.Key] = cv;
 			}
 
@@ -677,6 +678,11 @@ namespace Land.Control
 				// body
 				idx += 2;
 				var l = node.Children[idx].Location;
+				if (l == null)
+				{
+					Debug($"empty body: {node.Children[idx]}");
+					continue;
+				}
 				var txt = file.Text.Substring(l.Start.Offset, l.End.Offset - l.Start.Offset + 1);
 
 				var parsedFileCalls = ParseFragment(".pure_calls", file.Name, txt);
@@ -691,7 +697,7 @@ namespace Land.Control
 
 				if (callsCnt + controlsCnt == 0)
 				{
-					Debug($"non-trivial resolver {name}");
+					Debug($"trivial resolver {name}");
 					continue;
 				}
 

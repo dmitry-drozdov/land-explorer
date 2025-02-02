@@ -24,7 +24,8 @@ namespace Land.Control.Models
 
 		public int NumLines()
 		{
-			return ParsedFile.Fragment(Node.Location).Split('\n').Count(y => y.Length > 5 || y.Contains("}"));
+			// get function body
+			return ParsedFile.Fragment(Node.Children[6].Location).Split('\n').Count(y => y.Length > 5 || y.Contains("}"));
 		}
 		public GoFuncNode(ParsedFile file, Node node, string reciever, string package, string name, int callsCnt, int controlsCnt, int mockCallsCnt)
 		{
