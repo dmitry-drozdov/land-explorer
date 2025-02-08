@@ -132,9 +132,9 @@ namespace Land.Control
 
 			foreach (var file in gqlFiles)
 			{
-				d.Start();
+				d.Start("parseGQL");
 				var pFile = LogFunction(() => GetParsed(file), true, false);
-				d.Stop(ref d.ParseGraphql);
+				d.Stop("parseGQL");
 
 				if (pFile == null)
 				{
@@ -143,7 +143,7 @@ namespace Land.Control
 				}
 
 
-				d.Start();
+				d.Start("markGQL");
 				var funcsAndTypes = GetGraphqlFuncsAndTypes(pFile, gqlFuncs, gqlTypes);
 				foreach (var c in funcsAndTypes.Funcs.OfType<ExistingConcernPointCandidate>())
 				{
@@ -181,7 +181,7 @@ namespace Land.Control
 						gqlTypesConcernCandidate.Add(groupName, c);
 					}
 				}
-				d.Stop(ref d.AddGraphqlConcern);
+				d.Stop("markGQL");
 			}
 
 			Debug($"got {gqlFuncs.Count} gql functions");
@@ -195,18 +195,14 @@ namespace Land.Control
 			var potentialResolvers = new Dictionary<GoFuncNode, List<GoFuncNode>>();
 			var maxCallsPerResolver = new Dictionary<string, int>();
 
-			Stopwatch watch;
-
+	
 			foreach (var file in goFiles)
 			{
-				watch = Stopwatch.StartNew();
+				d.Start("parseGo");
 				var pFile = GetParsed(file, d);
-				watch.Stop();
-				d.ParseGoTotal += watch.ElapsedMilliseconds;
+				d.Stop("parseGo");
 
-				d.Start();
-				VisitGoResolversV2(pFile, gqlFuncs, gqlTypes, resolvers, potentialResolvers, maxCallsPerResolver);
-				d.Stop(ref d.VisitGo);
+				VisitGoResolversV2(pFile, gqlFuncs, gqlTypes, resolvers, potentialResolvers, maxCallsPerResolver, d);
 			}
 
 			Debug($"got {potentialResolvers.Count()} potential resolvers");
@@ -215,7 +211,7 @@ namespace Land.Control
 			var avgMaxCallsPerResolver = maxCallsPerResolver.Values.Average();
 
 
-			d.Start();
+			d.Start("markGo");
 			var linesPerFuncInStruct = new Dictionary<string, List<int>>(); // структура => кол-во строк в первой функции, кол-во строк во второй ф-и, в третьей, ...
 			var linesPerFuncInFile = new Dictionary<ParsedFile, List<int>>(); // File => кол-во строк в первой функции, кол-во строк во второй ф-и, в третьей, ...
 
@@ -340,7 +336,7 @@ namespace Land.Control
 			MarkupManager.CheckMarkup();
 
 
-			d.Stop(ref d.AddGoConcern);
+			d.Stop("markGo");
 
 			SetStatus(d.ToString(), ControlStatus.Success);
 
@@ -528,12 +524,13 @@ namespace Land.Control
 			Dictionary<string, List<ConcernPointCandidate>> graphqlTypes,
 			Dictionary<GoFuncNode, List<GoFuncNode>> resolvers,
 			Dictionary<GoFuncNode, List<GoFuncNode>> potentialResolvers,
-			Dictionary<string, int> maxCallsPerResolver
+			Dictionary<string, int> maxCallsPerResolver,
+			ResourceStats d
 			)
 		{
 			var nodes = MarkupManager.GetGoNodes(file.Root);
 			var types = GetGoTypes(nodes.Types);
-			VisitGoResolverCandidatesV2(file, nodes.Funcs, types, graphqlFuncs, graphqlTypes, resolvers, potentialResolvers, maxCallsPerResolver);
+			VisitGoResolverCandidatesV2(file, nodes.Funcs, types, graphqlFuncs, graphqlTypes, resolvers, potentialResolvers, maxCallsPerResolver, d);
 		}
 
 		public int VisitGoResolverBodyCalls(Node root)
@@ -631,7 +628,8 @@ namespace Land.Control
 			Dictionary<string, List<ConcernPointCandidate>> graphqlTypes,
 			Dictionary<GoFuncNode, List<GoFuncNode>> resolvers,
 			Dictionary<GoFuncNode, List<GoFuncNode>> potentialResolvers,
-			Dictionary<string, int> maxCallsPerResolver
+			Dictionary<string, int> maxCallsPerResolver,
+			ResourceStats d
 			)
 		{
 			var package = file.Root.Children[1].Children[0].ToString().Replace("ID: ", "");
@@ -685,12 +683,16 @@ namespace Land.Control
 				}
 				var txt = file.Text.Substring(l.Start.Offset, l.End.Offset - l.Start.Offset + 1);
 
+				d.Start("parseGoCalls");
 				var parsedFileCalls = ParseFragment(".pure_calls", file.Name, txt);
+				d.Stop("parseGoCalls");
 				var callsCnt = VisitGoResolverBodyCalls(parsedFileCalls.Root);
 
 				var mockCalls = VisitGoResolverBodyMockCalls(parsedFileCalls.Root);
 
+				d.Start("parseGoControls");
 				var parsedFileControls = ParseFragment(".controls", file.Name, txt);
+				d.Stop("parseGoControls");
 				var controlsCntRes = VisitGoResolverBodyControls(parsedFileControls.Root);
 				callsCnt += controlsCntRes.Item1;
 				var controlsCnt = controlsCntRes.Item2;

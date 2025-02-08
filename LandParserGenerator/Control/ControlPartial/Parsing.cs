@@ -74,7 +74,6 @@ namespace Land.Control
 		/// <returns></returns>
 		private ParsedFile TryParse(string fileName, string text, out bool success, bool dryRun = false, ResourceStats d = null)
 		{
-			d?.Start();
 			if (!String.IsNullOrEmpty(fileName))
 			{
 				var extension = Path.GetExtension(fileName);
@@ -84,7 +83,6 @@ namespace Land.Control
 					if (String.IsNullOrEmpty(text))
 						text = GetText(fileName);
 
-					d?.Stop(ref d.ParseGoLoadText);
 					Core.Parsing.Tree.Node root = null;
 
 					if (dryRun)
@@ -95,18 +93,12 @@ namespace Land.Control
 					else
 					{
 						var parser = Parsers[extension];
-						d?.Start();
 						var parseRes = parser.Parse(text, false);
-						d?.Stop(ref d.ParseGoTotalLibOutside);
 						root = parseRes.Item1;
 						var d1 = parseRes.Item2;
-						if (d != null)
-						{
-							d.ParseGoTotalLib += d1.Duration;
-						}
 
 
-						d?.Start();
+
 						success = Parsers[extension].Log.All(l => l.Type != MessageType.Error);
 						if (!success)
 						{
@@ -114,7 +106,6 @@ namespace Land.Control
 						}
 						Parsers[extension].Log.ForEach(l => l.FileName = fileName);
 						Log.AddRange(Parsers[extension].Log);
-						d?.Stop(ref d.ParseGoLog);
 					}
 
 					return success ? new ParsedFile

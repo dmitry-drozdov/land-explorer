@@ -8,48 +8,39 @@ using System.Threading.Tasks;
 
 namespace Land.Control.Models
 {
-	internal class ResourceStats
+	public class ResourceStats
 	{
-		public float ParseGraphql;
-		public float AddGraphqlConcern;
-		public float ParseGoTotalLib;
-		public float ParseGoTotalLibOutside;
-		public float ParseGoTotal;
-		public float ParseGoLoadText;
-		public float ParseGoLog;
-		public float VisitGo;
-		public float AddGoConcern;
-		private Stopwatch watch;
-		private long initialMemory = 0;
-		private long maxMemoryUsage = 0;
 
+		private Dictionary<string, Stopwatch> timers = new Dictionary<string, Stopwatch>();
+		private Dictionary<string, float> times = new Dictionary<string, float>();
 
-		public void Start()
+		public void Start(string name)
 		{
-			watch = Stopwatch.StartNew();
-			if (initialMemory == 0)
+			if (!timers.ContainsKey(name))
 			{
-				GC.Collect();
-				initialMemory = Process.GetCurrentProcess().PrivateMemorySize64;
+				timers.Add(name, new Stopwatch());
 			}
+			timers[name].Reset();
+			timers[name].Start();
 		}
-		public void Stop(ref float val)
+		public void Stop(string name)
 		{
-			watch.Stop();
-			val += watch.ElapsedMilliseconds;
-			var m = Process.GetCurrentProcess().PrivateMemorySize64;
-			if (m > maxMemoryUsage) maxMemoryUsage = m;
+			timers[name].Stop();
+			if (!times.ContainsKey(name))
+			{
+				times.Add(name, 0);
+			}
+			times[name] += timers[name].ElapsedMilliseconds;
 		}
 
 		public override string ToString()
 		{
-			GC.Collect();
-			var m = Process.GetCurrentProcess().PrivateMemorySize64;
-			if (m > maxMemoryUsage) maxMemoryUsage = m;
-			return $"[{(maxMemoryUsage - initialMemory) / (1024 * 1024)}Mb]" +
-				$"graphql [parse: {Format(ParseGraphql)}, add concern: {Format(AddGraphqlConcern)}] " +
-				$"go [parse {Format(ParseGoTotal)}=LIB:{Format(ParseGoTotalLib)}({Format(ParseGoTotalLibOutside)})+IO:{Format(ParseGoLoadText)}+LOG:{Format(ParseGoLog)}, " +
-					$"visit {Format(VisitGo)}, add concern {Format(AddGoConcern)}] ";
+			var s = "";
+			foreach (var item in times)
+			{
+				s += $"{item.Key}: {item.Value: 0}ms; ";
+			}
+			return s;
 		}
 
 		private string Format(float val)
