@@ -108,6 +108,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="ControlPartial\Automarkup.cs" />
+    <Compile Include="ControlPartial\AutomarkupTs.cs" />
     <Compile Include="ControlPartial\Tabs\RelationTab.cs" />
     <Compile Include="Helpers\SettingsSerializer.cs" />
     <Compile Include="Models\ResourceStats.cs" />

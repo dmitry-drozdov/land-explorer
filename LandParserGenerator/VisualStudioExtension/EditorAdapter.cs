@@ -240,7 +240,9 @@ namespace Land.VisualStudioExtension
 
 		public IEnumerable<string> GetAllFiles(string ext)
 		{
-			return Directory.EnumerateFiles(WorkingDirectory ?? @"e:\phd\test_repos_graphql2\HydroAPI\", $"*.{ext}", SearchOption.AllDirectories).
+			/*return Directory.EnumerateFiles(WorkingDirectory ?? @"e:\phd\test_repos_graphql2\HydroAPI\", $"*.{ext}", SearchOption.AllDirectories).
+				Where(x => !x.Contains(@"\vendor\"));*/
+			return Directory.EnumerateFiles(WorkingDirectory ?? @"e:\phd\ts\typescript-graphql-server\basic\", $"*.{ext}", SearchOption.AllDirectories).
 				Where(x => !x.Contains(@"\vendor\"));
 		}
 

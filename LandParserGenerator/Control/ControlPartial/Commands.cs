@@ -418,7 +418,8 @@ namespace Land.Control
 
 				//SWF.MessageBox.Show("Вычисление разметки...");
 
-				Fill();
+				//Fill();
+				FillTs();
 			}
 			catch (Exception ex)
 			{

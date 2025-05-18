@@ -426,6 +426,26 @@ namespace Land.Markup
 			return goNodes;
 		}
 
+		public void GetTsNodes(Node root, TsNodes tsNodes)
+		{
+			if (root == null)
+			{
+				return;
+			}
+
+			var nodeName = root.ToString();
+			if (nodeName == "func" || nodeName == "sub_field_func_impl" || nodeName == "sub_field_any")
+			{
+				tsNodes.Funcs.Add(root);
+				return;
+			}
+
+			foreach (var child in root.Children)
+			{
+				GetTsNodes(child, tsNodes);
+			}
+		}
+
 		/// <summary>
 		/// Смена узла, к которому привязана точка
 		/// </summary>
@@ -1127,6 +1147,16 @@ namespace Land.Markup
 			this.Types = Types;
 		}
 	}
+
+	public class TsNodes
+	{
+		public List<Node> Funcs { get; set; }
+		public TsNodes(List<Node> Funcs)
+		{
+			this.Funcs = Funcs;
+		}
+	}
+
 
 	public class GraphqlNodes
 	{
