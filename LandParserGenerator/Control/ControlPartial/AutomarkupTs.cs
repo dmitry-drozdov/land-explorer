@@ -102,23 +102,47 @@ namespace Land.Control
 			var tsFiles = Editor.GetAllFiles("ts");
 			foreach (var tsFile in tsFiles)
 			{
-				VisitTsNode(tsFile, resolvers, gqlFuncs);
+				VisitTsNode(tsFile, resolvers, gqlFuncs, gqlTypes);
 			}
 
 			foreach (var item in resolvers)
 			{
-				foreach(var resolver in item.Value)
+				foreach (var resolver in item.Value)
 				{
-					var gs = groups[resolver.Name];
+					Concern target = null;
+					if (!groups.ContainsKey(resolver.Name))
+					{
+						var c = gqlTypesConcernCandidate[resolver.Name];
+						var name = c.Node.Children.First().ToString();
+						var group = MarkupManager.AddConcern(name);
+						var groupName = name.ToLower().Replace("id: ", "");
+
+						MarkupManager.AddConcernPoint(
+							c.Node,
+							null,
+							c.ParsedFile,
+							c.ViewHeader,
+							"graphql schema",
+							group,
+							false
+						);
+						target = group;
+					}
+					else
+					{
+						target = groups[resolver.Name][0];
+					}
+
 					MarkupManager.AddConcernPoint(
 						resolver.Node,
 						null,
 						resolver.ParsedFile,
 						resolver.Name,
 						"",
-						gs[0],
+						target,
 						false
 					);
+
 				}
 			}
 		}
@@ -126,7 +150,8 @@ namespace Land.Control
 		void VisitTsNode(
 			string tsFile,
 			 Dictionary<TsFuncNode, List<TsFuncNode>> resolvers,
-			 Dictionary<string, List<ConcernPointCandidate>> gqlFuncs
+			 Dictionary<string, List<ConcernPointCandidate>> gqlFuncs,
+			  Dictionary<string, List<ConcernPointCandidate>> gqlTypes
 		)
 		{
 			var pFile = GetParsed(tsFile);
@@ -139,7 +164,7 @@ namespace Land.Control
 				var name = node.Children[0].ToString().Replace("ID: ", "").ToLower();
 				Debug($"{name} funcs found in {tsFile}");
 
-				if (!gqlFuncs.ContainsKey(name)) 
+				if (!gqlFuncs.ContainsKey(name) && !gqlTypes.ContainsKey(name))
 					continue;
 
 				var candidate = new TsFuncNode(pFile, node, name);
