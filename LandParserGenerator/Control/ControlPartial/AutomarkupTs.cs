@@ -116,6 +116,7 @@ namespace Land.Control
 						var name = c.Node.Children.First().ToString();
 						var group = MarkupManager.AddConcern(name);
 						var groupName = name.ToLower().Replace("id: ", "");
+						groups.Add(resolver.Name, new List<Concern>() { group });
 
 						MarkupManager.AddConcernPoint(
 							c.Node,
