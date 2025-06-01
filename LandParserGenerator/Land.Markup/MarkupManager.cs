@@ -426,23 +426,34 @@ namespace Land.Markup
 			return goNodes;
 		}
 
-		public void GetTsNodes(Node root, TsNodes tsNodes)
+		public TsNodes GetTsNodes(Node root)
 		{
-			if (root == null)
+			var res = new TsNodes();
+			foreach (var child in root.Children)
 			{
-				return;
+				var nodeName = child.ToString();
+				if (nodeName == "struct" || nodeName == "class" || nodeName == "lamda_struct")
+				{
+					var className = child.Children[1].ToString();
+					var list = new List<Node>();
+					GetTsNodesHelp(child, list);
+					res.FuncsPerClass[className] = list;
+				}
 			}
+			return res;
+		}
 
+		public void GetTsNodesHelp(Node root, List<Node> tsNodes)
+		{
 			var nodeName = root.ToString();
 			if (nodeName == "func" || nodeName == "sub_field_func_impl" || nodeName == "sub_field_any")
 			{
-				tsNodes.Funcs.Add(root);
+				tsNodes.Add(root);
 				return;
 			}
-
 			foreach (var child in root.Children)
 			{
-				GetTsNodes(child, tsNodes);
+				GetTsNodesHelp(child, tsNodes);
 			}
 		}
 
@@ -1150,11 +1161,8 @@ namespace Land.Markup
 
 	public class TsNodes
 	{
-		public List<Node> Funcs { get; set; }
-		public TsNodes(List<Node> Funcs)
-		{
-			this.Funcs = Funcs;
-		}
+		public Dictionary<string, List<Node>> FuncsPerClass { get; set; } = new Dictionary<string, List<Node>>();
+		public TsNodes() { }
 	}
 
 

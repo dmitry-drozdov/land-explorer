@@ -42,9 +42,11 @@ namespace Land.Control
 
 			foreach (var file in gqlFiles)
 			{
+				Debug($"parsing gql {file}");
 				d.Start("parseGQL");
 				var pFile = LogFunction(() => GetParsed(file), true, false);
 				d.Stop("parseGQL");
+				Debug($"parsed gql {file}");
 
 				if (pFile == null)
 				{
@@ -100,10 +102,12 @@ namespace Land.Control
 			var resolvers = new Dictionary<TsFuncNode, List<TsFuncNode>>();
 
 			var tsFiles = Editor.GetAllFiles("ts");
+			Debug("parsed ts");
 			foreach (var tsFile in tsFiles)
 			{
 				VisitTsNode(tsFile, resolvers, gqlFuncs, gqlTypes);
 			}
+			Debug("visited ts");
 
 			foreach (var item in resolvers)
 			{
@@ -118,6 +122,7 @@ namespace Land.Control
 						var groupName = name.ToLower().Replace("id: ", "");
 						groups.Add(resolver.Name, new List<Concern>() { group });
 
+						Debug(c.ParsedFile.Name);
 						MarkupManager.AddConcernPoint(
 							c.Node,
 							null,
@@ -134,11 +139,12 @@ namespace Land.Control
 						target = groups[resolver.Name][0];
 					}
 
+					Debug(resolver.ParsedFile.Name);
 					MarkupManager.AddConcernPoint(
 						resolver.Node,
 						null,
 						resolver.ParsedFile,
-						resolver.Name,
+						resolver.ToString(),
 						"",
 						target,
 						false
@@ -156,24 +162,27 @@ namespace Land.Control
 		)
 		{
 			var pFile = GetParsed(tsFile);
-			var tsNodes = new TsNodes(new List<Node>());
-			MarkupManager.GetTsNodes(pFile.Root, tsNodes);
+			var tsNodes = MarkupManager.GetTsNodes(pFile.Root);
 
-			Debug($"{tsNodes.Funcs.Count} funcs found in {tsFile}");
-			foreach (var node in tsNodes.Funcs)
+			//Debug($"{tsNodes.Funcs.Count} funcs found in {tsFile}");
+			foreach (var kv in tsNodes.FuncsPerClass)
 			{
-				var name = node.Children[0].ToString().Replace("ID: ", "").ToLower();
-				Debug($"{name} funcs found in {tsFile}");
-
-				if (!gqlFuncs.ContainsKey(name) && !gqlTypes.ContainsKey(name))
-					continue;
-
-				var candidate = new TsFuncNode(pFile, node, name);
-				if (!resolvers.ContainsKey(candidate))
+				foreach (var node in kv.Value)
 				{
-					resolvers.Add(candidate, new List<TsFuncNode>());
+					var name = node.Children[0].ToString().Replace("ID: ", "").ToLower();
+					//Debug($"{name} funcs found in {tsFile}");
+					var args = node.Children[1].Children.Select(x => x.ToString().Replace("arg", "")).Where(x => x != "").ToList();
+
+					if (!gqlFuncs.ContainsKey(name) && !gqlTypes.ContainsKey(name))
+						continue;
+
+					var candidate = new TsFuncNode(pFile, node, name, kv.Key, args);
+					if (!resolvers.ContainsKey(candidate))
+					{
+						resolvers.Add(candidate, new List<TsFuncNode>());
+					}
+					resolvers[candidate].Add(candidate);
 				}
-				resolvers[candidate].Add(candidate);
 			}
 
 		}

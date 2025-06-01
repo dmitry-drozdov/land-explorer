@@ -5,6 +5,7 @@ using Land.Markup.CoreExtension;
 using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Text;
 
@@ -569,21 +570,25 @@ namespace Land.Markup.Binding
 		{
 			if (core == null)
 			{
+				//System.Diagnostics.Debug.WriteLine("LOG🔔 " + "GetCoreContext");
 				core = PointContext.GetCoreContext(node, file, cachedAncestorsContext);
 			}
 
 			if (closestArgs != null && core.ClosestContext == null)
 			{
+				//System.Diagnostics.Debug.WriteLine("LOG🔔 " + "GetClosestContext");
 				core.ClosestContext = GetClosestContext(node, file, core, closestArgs);
 			}
 
 			/// Конструируем контекст соседей, если его нет или если он создан в упрощённом порядке
 			if (siblingsArgs != null && (core.SiblingsContext == null || core.SiblingsContext.IsSimplified))
 			{
+				//System.Diagnostics.Debug.WriteLine("LOG🔔 " + "GetSiblingsContext");
 				core.SiblingsContext = GetSiblingsContext(node, file, siblingsArgs);
 
 				#region Old
 
+				//System.Diagnostics.Debug.WriteLine("LOG🔔 " + "GetSiblingsContext_old");
 				core.SiblingsContext_old = GetSiblingsContext_old(node, file);
 
 				#endregion old
@@ -743,6 +748,7 @@ namespace Land.Markup.Binding
 								stack.Push(current.Children[i]);
 						}
 					}
+					//System.Diagnostics.Debug.WriteLine("LOG🔔 " + "looped");
 				}
 			}
 
@@ -879,6 +885,11 @@ namespace Land.Markup.Binding
 			}
 
 		SkipSiblingsSearch:
+
+			if (siblings.Count == 0)
+			{
+				siblings.Add(node);
+			}
 
 			/// Индекс помечаемого элемента
 			var markedElementIndex = siblings.IndexOf(node);
@@ -1029,6 +1040,10 @@ namespace Land.Markup.Binding
 		SkipSiblingsSearch:
 
 			/// Индекс помечаемого элемента
+			if (siblings.Count == 0)
+			{
+				siblings.Add(node);
+			}
 			var markedElementIndex = siblings.IndexOf(node);
 			siblings.RemoveAt(markedElementIndex);
 

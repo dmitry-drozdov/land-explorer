@@ -14,11 +14,15 @@ namespace Land.Control.Models
 		public ParsedFile ParsedFile { get; set; }
 		public Node Node { get; set; }
 		public string Name { get; set; }
+		public string ClassName { get; set; }
+		public List<string> Args { get; set; }
 
-		public TsFuncNode(ParsedFile parsedFile, Node node, string name) { 
+		public TsFuncNode(ParsedFile parsedFile, Node node, string name, string className, List<string> args) { 
 			this.ParsedFile = parsedFile;
 			this.Node = node;
 			this.Name = name;
+			this.ClassName = className;
+			this.Args = args;
 		}
 
 		public override int GetHashCode()
@@ -32,7 +36,7 @@ namespace Land.Control.Models
 
 		public override string ToString()
 		{
-			return $"{Name}";
+			return $"{ClassName}.{Name} ({Args.Count})";
 		}
 
 		public bool Equals(TsFuncNode obj)
