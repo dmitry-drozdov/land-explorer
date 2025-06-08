@@ -320,6 +320,12 @@ namespace Land.Control
 				);
 
 				c = gqlTypesConcernCandidate[name];
+				var typeName = c.Node.Parent.Children[1].ToString();
+				if (!group.Name.EndsWith(typeName))
+				{
+					group.Name += typeName;
+				}
+
 				//adding gql
 				MarkupManager.AddConcernPoint(
 						c.Node,
