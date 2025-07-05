@@ -119,6 +119,9 @@
     <Compile Include="Parsing\CacheAction.cs" />
     <Compile Include="Parsing\ParserManager.cs" />
     <Compile Include="Parsing\ParserLoader.cs" />
+    <Compile Include="TextInputDialog.xaml.cs">
+      <DependentUpon>TextInputDialog.xaml</DependentUpon>
+    </Compile>
     <Compile Include="Window_ConcernGraph.xaml.cs">
       <DependentUpon>Window_ConcernGraph.xaml</DependentUpon>
     </Compile>
@@ -151,6 +154,10 @@
     <Compile Include="Window_LandExplorerSettings.xaml.cs">
       <DependentUpon>Window_LandExplorerSettings.xaml</DependentUpon>
     </Compile>
+    <Page Include="TextInputDialog.xaml">
+      <SubType>Designer</SubType>
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
     <Page Include="Window_ConcernGraph.xaml">
       <SubType>Designer</SubType>
       <Generator>MSBuild:Compile</Generator>

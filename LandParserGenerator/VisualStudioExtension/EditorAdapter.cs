@@ -242,7 +242,7 @@ namespace Land.VisualStudioExtension
 		{
 			/*return Directory.EnumerateFiles(WorkingDirectory ?? @"e:\phd\test_repos_graphql2\HydroAPI\", $"*.{ext}", SearchOption.AllDirectories).
 				Where(x => !x.Contains(@"\vendor\"));*/
-			return Directory.EnumerateFiles(WorkingDirectory ?? @"e:\phd\test_repos_graphql2\core-geth\", $"*.{ext}", SearchOption.AllDirectories).
+			return Directory.EnumerateFiles(WorkingDirectory ?? @"e:\phd\test_repos_graphql2\sturdy\", $"*.{ext}", SearchOption.AllDirectories).
 				Where(x => !x.Contains(@"\vendor\"));
 		}
 

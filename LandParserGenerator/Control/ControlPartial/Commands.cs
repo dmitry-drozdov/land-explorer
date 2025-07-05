@@ -206,6 +206,87 @@ namespace Land.Control
 			}
 		}
 
+		private void Command_OpenDocumentation_Executed(object sender, ExecutedRoutedEventArgs e)
+		{
+			var clickedObject = e.Parameter as ConcernPoint;
+			if (clickedObject != null && clickedObject.DocumentationUrl != "")
+			{
+				Process.Start(clickedObject.DocumentationUrl);
+			}
+		}
+
+		private void Command_OpenDocumentation_CanExecute(object sender, CanExecuteRoutedEventArgs e)
+		{
+			if (e.Parameter == null)
+			{
+				e.CanExecute = false;
+				return;
+			}
+
+			var clickedObject = e.Parameter as ConcernPoint;
+			e.CanExecute = clickedObject != null && clickedObject.DocumentationUrl != "";
+		}
+
+		// Проверка, что объект выбран
+		private void Command_HasSelectedObject_CanExecute(object sender, CanExecuteRoutedEventArgs e)
+		{
+			e.CanExecute = e.Parameter != null;
+		}
+
+		// Обработчик установки URL
+		private void Command_SetDocumentationUrl_Executed(object sender, ExecutedRoutedEventArgs e)
+		{
+			if (e.Parameter == null) return;
+
+			// Создаем диалоговое окно
+			var dialog = new TextInputDialog
+			{
+				Owner = Window.GetWindow(this),
+				Title = "Задать ссылку на документацию",
+				Question = "Введите URL документации:",
+				DefaultText = GetCurrentUrl(e.Parameter) // Опционально: текущий URL
+			};
+
+			if (dialog.ShowDialog() == true && !string.IsNullOrWhiteSpace(dialog.ResponseText))
+			{
+				SetUrlForObject(e.Parameter, dialog.ResponseText);
+			}
+		}
+
+		// Получение текущего URL (если есть)
+		private string GetCurrentUrl(object obj)
+		{
+			var clickedObject = obj as ConcernPoint;
+
+			if (clickedObject != null)
+			{
+				return clickedObject.DocumentationUrl;
+			}
+
+			return null;
+		}
+
+		// Установка URL для объекта
+		private void SetUrlForObject(object obj, string url)
+		{
+			var clickedObject = obj as ConcernPoint;
+
+			if (clickedObject != null)
+			{
+				if (!Uri.IsWellFormedUriString(url, UriKind.Absolute))
+				{
+					MessageBox.Show("Введите корректный URL (начинается с http:// или https://)");
+					return;
+				}
+				clickedObject.DocumentationUrl = url;
+			}
+			else
+			{
+				MessageBox.Show("Невозможно установить URL для данного объекта");
+			}
+		}
+
+
 		private void Command_AddPoint_Executed(object sender, RoutedEventArgs e)
 		{
 			try

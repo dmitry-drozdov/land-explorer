@@ -15,6 +15,24 @@ namespace Land.Control
 				}
 			);
 
+		public static RoutedUICommand SetDocumentationUrl { get; } = new RoutedUICommand
+		(
+		    "Задать ссылку на документацию",
+		    "SetDocumentationUrl",
+		    typeof(LandExplorerCommands)
+		);
+
+		public static RoutedUICommand OpenDocumentation { get; } = new RoutedUICommand
+		(
+			"Открыть документацию",
+			"OpenDocumentation",
+			typeof(LandExplorerCommands),
+			new InputGestureCollection()
+			{
+						new KeyGesture(Key.O, ModifierKeys.Control | ModifierKeys.Alt)
+			}
+		);
+
 		public static RoutedUICommand AddPoint { get; } = new RoutedUICommand
 			(
 				"Быстрое добавление точки привязки",
@@ -114,7 +132,7 @@ namespace Land.Control
 				typeof(LandExplorerCommands)
 			);
 
-		public static RoutedUICommand Export{ get; } = new RoutedUICommand
+		public static RoutedUICommand Export { get; } = new RoutedUICommand
 			(
 				"Экспортировать...",
 				"Export",

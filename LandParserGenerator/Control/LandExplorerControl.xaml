@@ -23,6 +23,8 @@
 		<CommandBinding Command="ApplicationCommands.SaveAs" Executed="Command_SaveAs_Executed" CanExecute="Command_AlwaysEnabled_CanExecute"/>
 
 		<CommandBinding Command="local:LandExplorerCommands.SelectPoint" Executed="Command_SelectPoint_Executed" CanExecute="Command_AlwaysEnabled_CanExecute"/>
+        <CommandBinding Command="local:LandExplorerCommands.SetDocumentationUrl" Executed="Command_SetDocumentationUrl_Executed" CanExecute="Command_HasSelectedObject_CanExecute"/>
+        <CommandBinding Command="local:LandExplorerCommands.OpenDocumentation" Executed="Command_OpenDocumentation_Executed" CanExecute="Command_OpenDocumentation_CanExecute"/>
 		<CommandBinding Command="local:LandExplorerCommands.AddPoint" Executed="Command_AddPoint_Executed" CanExecute="Command_AlwaysEnabled_CanExecute"/>
 		<CommandBinding Command="local:LandExplorerCommands.AddConcern" Executed="Command_AddConcern_Executed" CanExecute="Command_AlwaysEnabled_CanExecute"/>
 		<CommandBinding Command="local:LandExplorerCommands.AddLand" Executed="Command_AddLand_Executed" CanExecute="Command_AlwaysEnabled_CanExecute"/>
@@ -93,6 +95,8 @@
 				
                 <Separator Margin="7"></Separator>
 
+                <Button Content="&#xf067;" ToolTip="{Binding Command.Text, RelativeSource={RelativeSource Self}}"
+					Command="local:LandExplorerCommands.OpenDocumentation" CommandTarget="{Binding ElementName=LandExplorer}"></Button>
 				<Button Content="&#xf067;" ToolTip="{Binding Command.Text, RelativeSource={RelativeSource Self}}"
 						Command="local:LandExplorerCommands.AddPoint" CommandTarget="{Binding ElementName=LandExplorer}"></Button>
 				<Button Content="&#xf65e;" ToolTip="{Binding Command.Text, RelativeSource={RelativeSource Self}}" 
@@ -167,6 +171,8 @@
 							</Grid>
                             <StackPanel.ContextMenu>
                                 <ContextMenu>
+                                    <MenuItem Command="local:LandExplorerCommands.SetDocumentationUrl" CommandTarget="{Binding ElementName=LandExplorer}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
+                                    <MenuItem Command="local:LandExplorerCommands.OpenDocumentation" CommandTarget="{Binding ElementName=LandExplorer}" CommandParameter="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource AncestorType=ContextMenu}}"/>
                                     <MenuItem Command="local:LandExplorerCommands.AddPoint" CommandTarget="{Binding ElementName=LandExplorer}"/>
 									<MenuItem Command="local:LandExplorerCommands.SelectPoint" CommandTarget="{Binding ElementName=LandExplorer}"/>
 									<MenuItem Command="local:LandExplorerCommands.AddConcern" CommandTarget="{Binding ElementName=LandExplorer}"/>

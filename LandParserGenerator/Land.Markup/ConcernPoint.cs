@@ -29,6 +29,8 @@ namespace Land.Markup
 			}
 		}
 
+		public string DocumentationUrl { get; set; } = "https://ya.ru";
+
 		public double Metric { get; set; }
 
 		private LineContext _lineContext;
