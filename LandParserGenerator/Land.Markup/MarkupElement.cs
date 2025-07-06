@@ -13,6 +13,7 @@ namespace Land.Markup
 
 		private string _name;
 		private string _comment;
+		private string _documentation;
 
 		public string Name {
 			get => _name;
@@ -34,6 +35,19 @@ namespace Land.Markup
 				PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Comment)));
 			}
 		}
+
+
+		public string Documentation
+		{
+			get => _documentation;
+			set
+			{
+				_documentation = value;
+
+				PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Documentation)));
+			}
+		}
+
 
 		[JsonIgnore]
 		public Concern Parent { get; set; }

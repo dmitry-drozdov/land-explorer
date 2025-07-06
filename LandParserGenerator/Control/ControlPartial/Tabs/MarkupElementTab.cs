@@ -17,6 +17,8 @@ using Land.Core.Parsing.Preprocessing;
 using Land.Markup;
 using Land.Control.Helpers;
 using System.ComponentModel;
+using System.Security.Policy;
+using System.Diagnostics;
 
 namespace Land.Control
 {
@@ -266,6 +268,46 @@ namespace Land.Control
 			MarkupElementCommentText.Text = State.TextsBeingEdited[nameof(MarkupElementCommentText)];
 		}
 
+		private void MarkupElementDocumentationEdit_Click(object sender, RoutedEventArgs e)
+		{
+			SetMarkupElementDocumentationEditState(true);
+
+			State.TextsBeingEdited[nameof(MarkupElementDocumentationText)] = MarkupElementDocumentationText.Text;
+		}
+
+		private void MarkupElementDocumentationOpen_Click(object sender, RoutedEventArgs e)
+		{
+			var data = (MarkupElement)State.SelectedItem_MarkupTreeView.DataContext;
+			if (data==null || data.Documentation == null || data.Documentation == "")
+			{
+				return;
+			}
+
+			Process.Start(data.Documentation);
+		}
+
+		private void MarkupElementDocumentationSave_Click(object sender, RoutedEventArgs e)
+		{
+			SetMarkupElementDocumentationEditState(false);
+
+			var data = (MarkupElement)State.SelectedItem_MarkupTreeView.DataContext;
+
+			if (!Uri.IsWellFormedUriString(MarkupElementDocumentationText.Text, UriKind.Absolute) && MarkupElementDocumentationText.Text != "")
+			{
+				MarkupElementDocumentationText.Text = data.Documentation;
+				MessageBox.Show("Введите корректный URL (начинается с http:// или https://)");
+				return;
+			}
+			data.Documentation = MarkupElementDocumentationText.Text;
+		}
+
+		private void MarkupElementDocumentationCancel_Click(object sender, RoutedEventArgs e)
+		{
+			SetMarkupElementDocumentationEditState(false);
+
+			MarkupElementDocumentationText.Text = State.TextsBeingEdited[nameof(MarkupElementDocumentationText)];
+		}
+
 		private void SetMarkupElementCommentEditState(bool state)
 		{
 			SetCurrentPointEditState(
@@ -273,6 +315,17 @@ namespace Land.Control
 				CurrentPointCommentEditButton,
 				CurrentPointCommentEditSaveButton,
 				CurrentPointCommentEditCancelButton,
+				state
+			);
+		}
+
+		private void SetMarkupElementDocumentationEditState(bool state)
+		{
+			SetCurrentPointEditState(
+				MarkupElementDocumentationText,
+				CurrentPointDocumentationEditButton,
+				CurrentPointDocumentationEditSaveButton,
+				CurrentPointDocumentationEditCancelButton,
 				state
 			);
 		}

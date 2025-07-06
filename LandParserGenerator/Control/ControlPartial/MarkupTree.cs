@@ -216,6 +216,7 @@ namespace Land.Control
 
 			MarkupElementNameText.Text = data.Name;
 			MarkupElementCommentText.Text = data.Comment;
+			MarkupElementDocumentationText.Text = data.Documentation;
 
 			e.Handled = true;
 		}

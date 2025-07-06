@@ -301,7 +301,9 @@
 								<RowDefinition></RowDefinition>
 								<RowDefinition></RowDefinition>
 								<RowDefinition Height="100*"></RowDefinition>
-							</Grid.RowDefinitions>
+                                <RowDefinition></RowDefinition>
+                                <RowDefinition Height="50*"></RowDefinition>
+                            </Grid.RowDefinitions>
 
 							<Grid Grid.Row="0">
 								<Grid.ColumnDefinitions>
@@ -348,7 +350,34 @@
 								Margin="5 0 5 10"
 								IsReadOnly="True">
 							</TextBox>
-						</Grid>
+
+                            <Grid Grid.Row="4">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <Label Content="Документация" />
+                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0 5 10 5" Grid.Column="2">
+                                    <Button Style="{StaticResource IconButton}" Name="CurrentPointDocumentationOpenButton" Click="MarkupElementDocumentationOpen_Click" Content="&#xf0ac;" ToolTip="Открыть" VerticalAlignment="Bottom"></Button>
+                                    <Button Style="{StaticResource IconButton}" Name="CurrentPointDocumentationEditButton" Click="MarkupElementDocumentationEdit_Click" Content="&#xf304;" ToolTip="Редактировать" VerticalAlignment="Bottom"></Button>
+                                    <Button Style="{StaticResource IconButton}" Name="CurrentPointDocumentationEditSaveButton" Click="MarkupElementDocumentationSave_Click" Content="&#xf00c;" ToolTip="Сохранить" Width="0px" Visibility="Hidden"></Button>
+                                    <Button Style="{StaticResource IconButton}" Name="CurrentPointDocumentationEditCancelButton" Click="MarkupElementDocumentationCancel_Click" Content="&#xf00d;" ToolTip="Отменить" Width="0px" Visibility="Hidden"></Button>
+                                </StackPanel>
+                            </Grid>
+
+                            <TextBox 
+								Grid.Row="5"
+								TextWrapping="Wrap" 
+								AcceptsReturn="True"
+								Name="MarkupElementDocumentationText"
+								MouseDoubleClick="MarkupElementText_MouseDoubleClick"
+								ScrollViewer.VerticalScrollBarVisibility="Auto"
+								Margin="5 0 5 10"
+								IsReadOnly="True">
+                            </TextBox>
+
+                        </Grid>
 					</Grid>
 				</ScrollViewer>
 			</TabItem>
