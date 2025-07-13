@@ -11,6 +11,7 @@ using Land.Markup.Relations;
 using Land.Markup.Tree;
 using Land.Markup.CoreExtension;
 using Land.Core.Specification;
+using Land.Control;
 
 namespace Land.Markup
 {
@@ -193,9 +194,12 @@ namespace Land.Markup
 			string comment = null,
 			MarkupElement targetElement = null,
 			bool remap = true,
-			double metric = 0)
+			double metric = 0,
+			Dictionary<Node, SiblingsContextConstructionCache> ancestorToSiblingsCache = null)
 		{
 			if (remap) Remap(node.Type, file, true);
+			if (ancestorToSiblingsCache == null)
+				ancestorToSiblingsCache = new Dictionary<Node, SiblingsContextConstructionCache>();
 
 			var parent = targetElement is ConcernPoint concernPoint
 				? concernPoint.Parent
@@ -206,19 +210,23 @@ namespace Land.Markup
 				ContextFinder = ContextFinder
 			};
 
-			var context = ContextFinder.ContextManager.GetContext(
-				node,
-				file,
-				siblingsArgs,
-				new ClosestConstructionArgs
-				{
-					SearchArea = new List<ParsedFile> { file },
-					GetParsed = ContextFinder.GetParsed,
-					ContextFinder = ContextFinder,
-					SiblingsArgs = siblingsArgs
-				}
-			);
-
+			PointContext context;
+			using (var scope = Tracing.Tracer.BuildSpan("GetContext_inside").StartActive())
+			{
+				context = ContextFinder.ContextManager.GetContext(
+					node,
+					file,
+					siblingsArgs,
+					new ClosestConstructionArgs
+					{
+						SearchArea = new List<ParsedFile> { file },
+						GetParsed = ContextFinder.GetParsed,
+						ContextFinder = ContextFinder,
+						SiblingsArgs = siblingsArgs
+					},
+					ancestorToSiblingsCache
+				);
+			}
 			var lineContext = line != null
 				? new LineContext(node.Location, line, file.Text)
 				: null;
@@ -283,7 +291,8 @@ namespace Land.Markup
 									GetParsed = ContextFinder.GetParsed,
 									ContextFinder = ContextFinder,
 									SiblingsArgs = subconcernSiblingsArgs
-								}
+								},
+								new Dictionary<Node, SiblingsContextConstructionCache>()
 							),
 							node.Location,
 							null,
@@ -317,7 +326,8 @@ namespace Land.Markup
 								GetParsed = ContextFinder.GetParsed,
 								ContextFinder = ContextFinder,
 								SiblingsArgs = siblingsArgs
-							}
+							},
+							new Dictionary<Node, SiblingsContextConstructionCache>()
 						),
 						node.Location,
 						null,
@@ -482,7 +492,8 @@ namespace Land.Markup
 						GetParsed = ContextFinder.GetParsed,
 						ContextFinder = ContextFinder,
 						SiblingsArgs = siblingsArgs
-					}
+					},
+					new Dictionary<Node, SiblingsContextConstructionCache>()
 				),
 				node.Location,
 				lineLocation != null ? new LineContext(node.Location, lineLocation, file.Text) : null,
@@ -512,7 +523,8 @@ namespace Land.Markup
 					GetParsed = ContextFinder.GetParsed,
 					ContextFinder = ContextFinder,
 					SiblingsArgs = siblingsArgs
-				}
+				},
+				new Dictionary<Node, SiblingsContextConstructionCache>()
 			);
 
 			var (lineContext, lineLocation, totalSimilarity) = point.LineContext != null
@@ -1109,7 +1121,7 @@ namespace Land.Markup
 					foreach (var element in c.Elements)
 					{
 						if ((element as ConcernPoint).Metric != 0)
-							element.Name += " m = "+(element as ConcernPoint).Metric.ToString();
+							element.Name += " m = " + (element as ConcernPoint).Metric.ToString();
 					}
 				}
 

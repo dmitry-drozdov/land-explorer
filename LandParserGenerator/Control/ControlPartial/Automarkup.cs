@@ -284,7 +284,6 @@ namespace Land.Control
 							group,
 							false,
 							m// ресивер = тип в графкл => это наш кандидат
-
 						);
 					}
 				}

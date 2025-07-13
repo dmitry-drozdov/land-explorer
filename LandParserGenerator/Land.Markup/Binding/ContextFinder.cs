@@ -231,7 +231,6 @@ namespace Land.Markup.Binding
 					continue;
 				}
 
-				var neighboursCache = GetNeighbours(currentFile, points.Keys.ToList());
 
 				var visitor = new GroupNodesByTypeVisitor(points.Keys.ToList());
 				currentFile.Root.Accept(visitor);
@@ -255,37 +254,14 @@ namespace Land.Markup.Binding
 							/// Если нужно проверить соседей, проверяем, не закешировали ли их
 							if (checkSiblings)
 							{
-								SiblingsContextConstructionCache cache = null;
-
-								/// Ищем предка, относительно которого нужно искать соседей
-								var ancestor = PointContext.GetAncestor(n)
-									?? (n != currentFile.Root ? currentFile.Root : null);
-
-								/// Если таковой есть, пытаемся найти инфу о нём в кеше
-								if (ancestor != null)
-								{
-									cache = ancestorToSiblingsCache.ContainsKey(ancestor)
-										? ancestorToSiblingsCache[ancestor]
-										: new SiblingsContextConstructionCache
-										{
-											Ancestor = ancestor,
-											Neighbours = neighboursCache
-										};
-								}
-
 								candidate.Context.SiblingsContext = PointContext.GetSiblingsContext(
 									n, 
 									currentFile,
 									siblingsArgs,
-									cache
+									ancestorToSiblingsCache
 								);
 
-								candidate.Context.SiblingsContext_old = PointContext.GetSiblingsContext_old(n, currentFile, cache);
-
-								if (ancestor != null && !ancestorToSiblingsCache.ContainsKey(ancestor))
-								{
-									ancestorToSiblingsCache[ancestor] = cache;
-								}
+								candidate.Context.SiblingsContext_old = PointContext.GetSiblingsContext_old(n, currentFile, null);
 							}
 
 							return candidate;

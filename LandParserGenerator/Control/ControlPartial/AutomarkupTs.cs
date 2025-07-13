@@ -31,6 +31,8 @@ namespace Land.Control
 	{
 		void FillTs()
 		{
+			Tracing.Init();
+
 			var gqlFiles = Editor.GetAllFiles("graphql");
 
 			var gqlFuncs = new Dictionary<string, List<ConcernPointCandidate>>();
@@ -73,6 +75,8 @@ namespace Land.Control
 					else
 						groups.Add(groupName, new List<Concern>() { group });
 
+					Debug("start adding concern");
+
 					MarkupManager.AddConcernPoint(
 						c.Node,
 						null,
@@ -82,6 +86,8 @@ namespace Land.Control
 						group,
 						false
 					);
+
+					Debug("end adding concern");
 				}
 
 				foreach (var c in funcsAndTypes.Types.OfType<ExistingConcernPointCandidate>())
