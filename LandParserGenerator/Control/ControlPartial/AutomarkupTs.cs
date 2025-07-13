@@ -113,13 +113,18 @@ namespace Land.Control
 			{
 				foreach (var resolver in item.Value)
 				{
+					double metric = 0;
+					if (resolver.ClassName.ToLower().Contains("resolver"))
+						metric += 1;
+
+
 					Concern target = null;
 					if (!groups.ContainsKey(resolver.Name))
 					{
 						var c = gqlTypesConcernCandidate[resolver.Name];
 						var name = c.Node.Children.First().ToString();
 						var group = MarkupManager.AddConcern(name);
-						var groupName = name.ToLower().Replace("id: ", "");
+						//var groupName = name.ToLower().Replace("id: ", "");
 						groups.Add(resolver.Name, new List<Concern>() { group });
 
 						Debug(c.ParsedFile.Name);
@@ -139,6 +144,16 @@ namespace Land.Control
 						target = groups[resolver.Name][0];
 					}
 
+					// TODO здесь надо сравнивать с именем ТИПА графкл, а не ПОЛЯ
+					if (resolver.ClassName.ToLower() == (target.Name.ToLower().Replace("id: ", "")))
+					{
+						metric += 1;
+					}
+					else if (resolver.ClassName.ToLower().Contains(target.Name.ToLower().Replace("id: ", "")))
+					{
+						metric += 0.75;
+					}
+
 					Debug(resolver.ParsedFile.Name);
 					MarkupManager.AddConcernPoint(
 						resolver.Node,
@@ -147,11 +162,14 @@ namespace Land.Control
 						resolver.ToString(),
 						"",
 						target,
-						false
+						false,
+						metric
 					);
 
 				}
 			}
+
+			MarkupManager.CheckMarkup();
 		}
 
 		void VisitTsNode(

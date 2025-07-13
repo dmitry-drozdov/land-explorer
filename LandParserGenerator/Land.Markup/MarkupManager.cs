@@ -1106,6 +1106,11 @@ namespace Land.Markup
 						c.Name += "<!>";
 					}
 					c.Elements.Sort((x, y) => (y as ConcernPoint).Metric.CompareTo((x as ConcernPoint).Metric));
+					foreach (var element in c.Elements)
+					{
+						if ((element as ConcernPoint).Metric != 0)
+							element.Name += " m = "+(element as ConcernPoint).Metric.ToString();
+					}
 				}
 
 			}
