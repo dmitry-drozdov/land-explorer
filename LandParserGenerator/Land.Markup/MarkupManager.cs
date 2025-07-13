@@ -195,11 +195,15 @@ namespace Land.Markup
 			MarkupElement targetElement = null,
 			bool remap = true,
 			double metric = 0,
-			Dictionary<Node, SiblingsContextConstructionCache> ancestorToSiblingsCache = null)
+			Dictionary<Node, SiblingsContextConstructionCache> ancestorToSiblingsCache = null,
+			Dictionary<string, GroupNodesByTypeVisitor> visitorCache = null)
 		{
 			if (remap) Remap(node.Type, file, true);
 			if (ancestorToSiblingsCache == null)
 				ancestorToSiblingsCache = new Dictionary<Node, SiblingsContextConstructionCache>();
+
+			if (visitorCache == null)
+				visitorCache=new Dictionary<string, GroupNodesByTypeVisitor>();
 
 			var parent = targetElement is ConcernPoint concernPoint
 				? concernPoint.Parent
@@ -224,6 +228,7 @@ namespace Land.Markup
 						ContextFinder = ContextFinder,
 						SiblingsArgs = siblingsArgs
 					},
+					visitorCache,
 					ancestorToSiblingsCache
 				);
 			}
@@ -292,6 +297,7 @@ namespace Land.Markup
 									ContextFinder = ContextFinder,
 									SiblingsArgs = subconcernSiblingsArgs
 								},
+								new Dictionary<string, GroupNodesByTypeVisitor>(),
 								new Dictionary<Node, SiblingsContextConstructionCache>()
 							),
 							node.Location,
@@ -327,6 +333,7 @@ namespace Land.Markup
 								ContextFinder = ContextFinder,
 								SiblingsArgs = siblingsArgs
 							},
+							new Dictionary<string, GroupNodesByTypeVisitor>(),
 							new Dictionary<Node, SiblingsContextConstructionCache>()
 						),
 						node.Location,
@@ -493,6 +500,7 @@ namespace Land.Markup
 						ContextFinder = ContextFinder,
 						SiblingsArgs = siblingsArgs
 					},
+					new Dictionary<string, GroupNodesByTypeVisitor>(),
 					new Dictionary<Node, SiblingsContextConstructionCache>()
 				),
 				node.Location,
@@ -524,6 +532,7 @@ namespace Land.Markup
 					ContextFinder = ContextFinder,
 					SiblingsArgs = siblingsArgs
 				},
+				new Dictionary<string, GroupNodesByTypeVisitor>(),
 				new Dictionary<Node, SiblingsContextConstructionCache>()
 			);
 

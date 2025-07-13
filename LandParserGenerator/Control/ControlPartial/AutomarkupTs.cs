@@ -5,6 +5,7 @@ using Land.Core;
 using Land.Core.Parsing.Tree;
 using Land.Markup;
 using Land.Markup.Binding;
+using Land.Markup.CoreExtension;
 using Land.Markup.Tree;
 using Microsoft.Win32;
 using System;
@@ -59,8 +60,12 @@ namespace Land.Control
 
 				d.Start("markGQL");
 				var funcsAndTypes = GetGraphqlFuncsAndTypes(pFile, gqlFuncs, gqlTypes);
-				foreach (var c in funcsAndTypes.Funcs.OfType<ExistingConcernPointCandidate>())
+				var visitorCache = new Dictionary<string, GroupNodesByTypeVisitor>();
+				var ancestorToSiblingsCache = new Dictionary<Node, SiblingsContextConstructionCache>();
+				var coll = funcsAndTypes.Funcs.OfType<ExistingConcernPointCandidate>().ToList();
+				for (int i = 0; i < coll.Count(); i++)
 				{
+					var c = coll[i];
 					var typeName = c.Node.Parent.Children[1].ToString().ToLower().Replace("id: ", "");
 					//Debug($"belongs to {typeName}");
 
@@ -75,7 +80,7 @@ namespace Land.Control
 					else
 						groups.Add(groupName, new List<Concern>() { group });
 
-					Debug("start adding concern");
+					Debug($"start adding concern {i+1} / {coll.Count}");
 
 					MarkupManager.AddConcernPoint(
 						c.Node,
@@ -84,7 +89,10 @@ namespace Land.Control
 						c.ViewHeader,
 						"graphql schema",
 						group,
-						false
+						false,
+						0,
+						ancestorToSiblingsCache,
+						visitorCache
 					);
 
 					Debug("end adding concern");

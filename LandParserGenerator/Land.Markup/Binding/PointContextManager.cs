@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text;
 using Land.Control;
 using Land.Core.Parsing.Tree;
+using Land.Markup.CoreExtension;
 using OpenTracing;
 
 namespace Land.Markup.Binding
@@ -46,10 +47,11 @@ namespace Land.Markup.Binding
 			ParsedFile file,
 			SiblingsConstructionArgs siblingsArgs,
 			ClosestConstructionArgs closestArgs,
+			Dictionary<string, GroupNodesByTypeVisitor> visitorCache,
 			Dictionary<Node, SiblingsContextConstructionCache> ancestorToSiblingsCache
 		)
 		{
-			return PointContext.GetExtendedContext(node, file, siblingsArgs, closestArgs, ancestorToSiblingsCache, GetContext(node, file),null);
+			return PointContext.GetExtendedContext(node, file, siblingsArgs, closestArgs, visitorCache, ancestorToSiblingsCache, GetContext(node, file),null);
 		}
 
 		public void ClearCache(string fileName)

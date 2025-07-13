@@ -216,6 +216,7 @@ namespace Land.Markup.Binding
 		{
 			var candidates = new Dictionary<string, List<RemapCandidateInfo>>();
 			var ancestorToSiblingsCache = new Dictionary<Node, SiblingsContextConstructionCache>();
+			var visitorCache = new Dictionary<string, GroupNodesByTypeVisitor>();
 
 			/// Инициализируем коллекции кандидатов для каждого типа
 			foreach (var type in points.Keys)
@@ -258,7 +259,8 @@ namespace Land.Markup.Binding
 									n, 
 									currentFile,
 									siblingsArgs,
-									ancestorToSiblingsCache
+									ancestorToSiblingsCache,
+									visitorCache
 								);
 
 								candidate.Context.SiblingsContext_old = PointContext.GetSiblingsContext_old(n, currentFile, null);
