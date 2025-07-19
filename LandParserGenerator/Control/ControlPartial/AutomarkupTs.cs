@@ -85,9 +85,7 @@ namespace Land.Control
 					else
 						groups.Add(groupName, new List<Concern>() { group });
 
-					//Debug($"start adding concern {i + 1} / {coll.Count}");
-					if (i > 3)
-						return;
+					Debug($"start adding concern {i + 1} / {coll.Count}");
 
 
 					using (var scope = Tracing.Tracer.BuildSpan("AddConcernPoint").StartActive())
@@ -105,7 +103,7 @@ namespace Land.Control
 							refresh: i == coll.Count - 1
 						);
 
-					//Debug("end adding concern");
+					Debug("end adding concern");
 				}
 
 				foreach (var c in funcsAndTypes.Types.OfType<ExistingConcernPointCandidate>())
@@ -151,7 +149,7 @@ namespace Land.Control
 						//var groupName = name.ToLower().Replace("id: ", "");
 						groups.Add(resolver.Name, new List<Concern>() { group });
 
-						Debug(c.ParsedFile.Name);
+						Debug($"Adding gql schema {c.ParsedFile.Name} {c.ViewHeader}");
 						MarkupManager.AddConcernPoint(
 							c.Node,
 							null,
@@ -178,7 +176,7 @@ namespace Land.Control
 						metric += 0.75;
 					}
 
-					Debug(resolver.ParsedFile.Name);
+					Debug($"Adding resolver {resolver.ParsedFile.Name} {resolver.ToString()}");
 					MarkupManager.AddConcernPoint(
 						resolver.Node,
 						null,

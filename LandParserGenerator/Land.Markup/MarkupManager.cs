@@ -199,6 +199,7 @@ namespace Land.Markup
 			double metric = 0,
 			Dictionary<Node, SiblingsContextConstructionCache> ancestorToSiblingsCache = null,
 			Dictionary<string, GroupNodesByTypeVisitor> visitorCache = null,
+			Dictionary<Node, SiblingsContext> siblingContextCache = null,
 			bool refresh = true)
 		{
 			if (remap) Remap(node.Type, file, true);
@@ -206,7 +207,10 @@ namespace Land.Markup
 				ancestorToSiblingsCache = new Dictionary<Node, SiblingsContextConstructionCache>();
 
 			if (visitorCache == null)
-				visitorCache=new Dictionary<string, GroupNodesByTypeVisitor>();
+				visitorCache = new Dictionary<string, GroupNodesByTypeVisitor>();
+
+			if (siblingContextCache == null)
+				siblingContextCache = new Dictionary<Node, SiblingsContext>();
 
 			var parent = targetElement is ConcernPoint concernPoint
 				? concernPoint.Parent
@@ -232,7 +236,8 @@ namespace Land.Markup
 						SiblingsArgs = siblingsArgs
 					},
 					visitorCache,
-					ancestorToSiblingsCache
+					ancestorToSiblingsCache,
+					siblingContextCache
 				);
 			}
 			var lineContext = line != null
@@ -302,7 +307,8 @@ namespace Land.Markup
 									SiblingsArgs = subconcernSiblingsArgs
 								},
 								new Dictionary<string, GroupNodesByTypeVisitor>(),
-								new Dictionary<Node, SiblingsContextConstructionCache>()
+								new Dictionary<Node, SiblingsContextConstructionCache>(),
+								new Dictionary<Node, SiblingsContext>()
 							),
 							node.Location,
 							null,
@@ -338,7 +344,8 @@ namespace Land.Markup
 								SiblingsArgs = siblingsArgs
 							},
 							new Dictionary<string, GroupNodesByTypeVisitor>(),
-							new Dictionary<Node, SiblingsContextConstructionCache>()
+							new Dictionary<Node, SiblingsContextConstructionCache>(),
+							new Dictionary<Node, SiblingsContext>()
 						),
 						node.Location,
 						null,
@@ -505,7 +512,8 @@ namespace Land.Markup
 						SiblingsArgs = siblingsArgs
 					},
 					new Dictionary<string, GroupNodesByTypeVisitor>(),
-					new Dictionary<Node, SiblingsContextConstructionCache>()
+					new Dictionary<Node, SiblingsContextConstructionCache>(),
+					new Dictionary<Node, SiblingsContext>()
 				),
 				node.Location,
 				lineLocation != null ? new LineContext(node.Location, lineLocation, file.Text) : null,
@@ -537,7 +545,8 @@ namespace Land.Markup
 					SiblingsArgs = siblingsArgs
 				},
 				new Dictionary<string, GroupNodesByTypeVisitor>(),
-				new Dictionary<Node, SiblingsContextConstructionCache>()
+				new Dictionary<Node, SiblingsContextConstructionCache>(),
+				new Dictionary<Node, SiblingsContext>()
 			);
 
 			var (lineContext, lineLocation, totalSimilarity) = point.LineContext != null

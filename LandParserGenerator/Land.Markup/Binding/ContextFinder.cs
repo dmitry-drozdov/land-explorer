@@ -260,7 +260,8 @@ namespace Land.Markup.Binding
 									currentFile,
 									siblingsArgs,
 									ancestorToSiblingsCache,
-									visitorCache
+									visitorCache,
+									new Dictionary<Node, SiblingsContext>()
 								);
 
 								candidate.Context.SiblingsContext_old = PointContext.GetSiblingsContext_old(n, currentFile, null);
