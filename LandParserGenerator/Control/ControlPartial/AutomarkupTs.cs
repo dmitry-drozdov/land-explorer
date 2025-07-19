@@ -33,6 +33,11 @@ namespace Land.Control
 		void FillTs()
 		{
 			Tracing.Init();
+			using (var scope = Tracing.Tracer.BuildSpan("FillTs").StartActive())
+				FillTsHelp();
+		}
+		void FillTsHelp()
+		{
 
 			var gqlFiles = Editor.GetAllFiles("graphql");
 
@@ -63,14 +68,14 @@ namespace Land.Control
 				var visitorCache = new Dictionary<string, GroupNodesByTypeVisitor>();
 				var ancestorToSiblingsCache = new Dictionary<Node, SiblingsContextConstructionCache>();
 				var coll = funcsAndTypes.Funcs.OfType<ExistingConcernPointCandidate>().ToList();
-				for (int i = 0; i < coll.Count(); i++)
+				for (int i = 0; i < coll.Count; i++)
 				{
 					var c = coll[i];
 					var typeName = c.Node.Parent.Children[1].ToString().ToLower().Replace("id: ", "");
 					//Debug($"belongs to {typeName}");
 
 					var name = c.Node.Children.First().ToString();
-					var group = MarkupManager.AddConcern(name);
+					var group = MarkupManager.AddConcern(name, refresh: i == coll.Count - 1);
 					var groupName = name.ToLower().Replace("id: ", "");
 
 					group.GqlTypeName = typeName;
@@ -80,22 +85,27 @@ namespace Land.Control
 					else
 						groups.Add(groupName, new List<Concern>() { group });
 
-					Debug($"start adding concern {i+1} / {coll.Count}");
+					//Debug($"start adding concern {i + 1} / {coll.Count}");
+					if (i > 3)
+						return;
 
-					MarkupManager.AddConcernPoint(
-						c.Node,
-						null,
-						pFile,
-						c.ViewHeader,
-						"graphql schema",
-						group,
-						false,
-						0,
-						ancestorToSiblingsCache,
-						visitorCache
-					);
 
-					Debug("end adding concern");
+					using (var scope = Tracing.Tracer.BuildSpan("AddConcernPoint").StartActive())
+						MarkupManager.AddConcernPoint(
+							c.Node,
+							null,
+							pFile,
+							c.ViewHeader,
+							"graphql schema",
+							group,
+							false,
+							0,
+							ancestorToSiblingsCache,
+							visitorCache,
+							refresh: i == coll.Count - 1
+						);
+
+					//Debug("end adding concern");
 				}
 
 				foreach (var c in funcsAndTypes.Types.OfType<ExistingConcernPointCandidate>())

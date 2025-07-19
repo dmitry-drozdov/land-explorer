@@ -170,7 +170,8 @@ namespace Land.Markup
 		public Concern AddConcern(
 			string name,
 			string comment = null,
-			MarkupElement targetElement = null)
+			MarkupElement targetElement = null,
+			bool refresh = true)
 		{
 			var parent = targetElement is ConcernPoint concernPoint
 				? concernPoint.Parent
@@ -179,7 +180,8 @@ namespace Land.Markup
 
 			AddElement(concern);
 
-			OnMarkupChanged?.Invoke();
+			if (refresh)
+				OnMarkupChanged?.Invoke();
 			return concern;
 		}
 
@@ -196,7 +198,8 @@ namespace Land.Markup
 			bool remap = true,
 			double metric = 0,
 			Dictionary<Node, SiblingsContextConstructionCache> ancestorToSiblingsCache = null,
-			Dictionary<string, GroupNodesByTypeVisitor> visitorCache = null)
+			Dictionary<string, GroupNodesByTypeVisitor> visitorCache = null,
+			bool refresh = true)
 		{
 			if (remap) Remap(node.Type, file, true);
 			if (ancestorToSiblingsCache == null)
@@ -249,7 +252,8 @@ namespace Land.Markup
 
 			AddElement(point);
 
-			OnMarkupChanged?.Invoke();
+			if (refresh)
+				OnMarkupChanged?.Invoke();
 			return point;
 		}
 

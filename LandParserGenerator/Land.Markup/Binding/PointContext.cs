@@ -604,7 +604,7 @@ namespace Land.Markup.Binding
 
 				#region Old
 
-				core.SiblingsContext_old = GetSiblingsContext_old(node, file);
+				//core.SiblingsContext_old = GetSiblingsContext_old(node, file);
 
 				#endregion old
 			}
@@ -964,7 +964,7 @@ namespace Land.Markup.Binding
 			Dictionary<Node, SiblingsContextConstructionCache> ancestorToSiblingsCache,
 			Dictionary<string, GroupNodesByTypeVisitor> visitorCache)
 		{
-			using (var scope = Tracing.Tracer.BuildSpan("GetSiblingsContext").StartActive())
+			using (var scope = Tracing.Tracer.BuildSpan($"GetSiblingsContext {node.Children[0].ToString()}").StartActive())
 				return GetSiblingsContextHelp(node, file, args, ancestorToSiblingsCache, visitorCache);
 		}
 
@@ -1022,19 +1022,7 @@ namespace Land.Markup.Binding
 				}
 
 
-				neighbours = visitor.Grouped[node.Type].SelectMany(e => new List<BorderPoint>
-				{
-					new BorderPoint
-					{
-						Node = e,
-						Offset = e.Location.Start.Offset,
-					},
-					new BorderPoint
-					{
-						Node = e,
-						Offset = e.Location.End.Offset,
-					},
-				}).OrderBy(e => e.Offset).ToList();
+				neighbours = visitor.BorderPoints[node.Type];
 
 				if (cache != null)
 				{
@@ -1205,7 +1193,7 @@ namespace Land.Markup.Binding
 			Dictionary<Node, SiblingsContextConstructionCache> ancestorToSiblingsCache
 			)
 		{
-			using (var scope = Tracing.Tracer.BuildSpan("GetClosestContext").StartActive())
+			using (var scope = Tracing.Tracer.BuildSpan($"GetClosestContext {node.Children[0]}").StartActive())
 				return GetClosestContextHelp(node, file, nodeContext, args, ancestorToSiblingsCache, visitorCache, scope.Span);
 		}
 
