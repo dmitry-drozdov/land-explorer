@@ -82,6 +82,11 @@ namespace Land.Markup
 			HasUnsavedChanges = false;
 		}
 
+		public void Refresh()
+		{
+			OnMarkupChanged?.Invoke();
+		}
+
 		/// <summary>
 		/// Проверка того, что вся разметка синхронизирована с кодом
 		/// </summary>

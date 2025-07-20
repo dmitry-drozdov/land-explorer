@@ -1021,6 +1021,7 @@ namespace Land.Markup.Binding
 					{
 						scope.Span.SetTag("type", node.Type);
 						file.Root.Accept(visitor);
+						visitor.RecalcBorderpoints();
 					}
 					visitorCache.Add(node.Type, visitor);
 				}
@@ -1232,6 +1233,7 @@ namespace Land.Markup.Binding
 					{
 						scope.Span.SetTag("type", node.Type);
 						file.Root.Accept(visitor);
+						visitor.RecalcBorderpoints();
 					}
 					visitorCache.Add(node.Type, visitor);
 				}
@@ -1319,7 +1321,7 @@ namespace Land.Markup.Binding
 
 			span.SetTag("count", result.Count);
 
-			System.Diagnostics.Debug.WriteLine("LOG🔔 " + result.Count);
+			//System.Diagnostics.Debug.WriteLine("LOG🔔 " + result.Count);
 
 			foreach (var elem in result)
 			{

@@ -23,7 +23,6 @@ namespace Land.Markup.CoreExtension
 				&& node.Location != null)
 			{
 				Grouped[node.Type].Add(node);
-				RecalcBorderpoints();
 			}
 
 			base.Visit(node);
@@ -38,7 +37,7 @@ namespace Land.Markup.CoreExtension
 			return visitor.Grouped;
 		}
 
-		private void RecalcBorderpoints()
+		public void RecalcBorderpoints()
 		{
 			foreach (var g in Grouped)
 			{

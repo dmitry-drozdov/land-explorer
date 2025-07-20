@@ -103,7 +103,7 @@ namespace Land.Control
 							refresh: i == coll.Count - 1
 						);
 
-					Debug("end adding concern");
+					//Debug("end adding concern");
 				}
 
 				foreach (var c in funcsAndTypes.Types.OfType<ExistingConcernPointCandidate>())
@@ -157,7 +157,8 @@ namespace Land.Control
 							c.ViewHeader,
 							"graphql schema",
 							group,
-							false
+							false,
+							refresh: false
 						);
 						target = group;
 					}
@@ -185,12 +186,14 @@ namespace Land.Control
 						"",
 						target,
 						false,
-						metric
+						metric,
+						refresh: false
 					);
 
 				}
 			}
 
+			MarkupManager.Refresh();
 			MarkupManager.CheckMarkup();
 		}
 
