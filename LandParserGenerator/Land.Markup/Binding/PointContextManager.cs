@@ -49,10 +49,11 @@ namespace Land.Markup.Binding
 			ClosestConstructionArgs closestArgs,
 			Dictionary<string, GroupNodesByTypeVisitor> visitorCache,
 			Dictionary<Node, SiblingsContextConstructionCache> ancestorToSiblingsCache,
-			Dictionary<Node, SiblingsContext> siblingContextCache
+			Dictionary<Node, SiblingsContext> siblingContextCache,
+			Dictionary<Node, PointContext> pointContextCntOnlyCache
 		)
 		{
-			return PointContext.GetExtendedContext(node, file, siblingsArgs, closestArgs, visitorCache, ancestorToSiblingsCache, siblingContextCache, GetContext(node, file), null);
+			return PointContext.GetExtendedContext(node, file, siblingsArgs, closestArgs, visitorCache, ancestorToSiblingsCache, siblingContextCache, pointContextCntOnlyCache,GetContext(node, file), null);
 		}
 
 		public void ClearCache(string fileName)

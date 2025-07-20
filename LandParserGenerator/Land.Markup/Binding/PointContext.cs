@@ -571,11 +571,12 @@ namespace Land.Markup.Binding
 			Dictionary<string, GroupNodesByTypeVisitor> visitorCache,
 			Dictionary<Node, SiblingsContextConstructionCache> ancestorToSiblingsCache,
 			Dictionary<Node, SiblingsContext> siblingContextCache,
+			Dictionary<Node, PointContext> pointContextCntOnlyCache,
 			PointContext core = null,
 			List<AncestorsContextElement> cachedAncestorsContext = null)
 		{
 			using (var scope = Tracing.Tracer.BuildSpan("GetExtendedContext").StartActive())
-				return GetExtendedContextHelp(node, file, siblingsArgs, closestArgs, ancestorToSiblingsCache, visitorCache, siblingContextCache, core, cachedAncestorsContext);
+				return GetExtendedContextHelp(node, file, siblingsArgs, closestArgs, ancestorToSiblingsCache, visitorCache, siblingContextCache, pointContextCntOnlyCache, core, cachedAncestorsContext);
 		}
 
 		public static PointContext GetExtendedContextHelp(
@@ -586,6 +587,7 @@ namespace Land.Markup.Binding
 			Dictionary<Node, SiblingsContextConstructionCache> ancestorToSiblingsCache,
 			Dictionary<string, GroupNodesByTypeVisitor> visitorCache,
 			Dictionary<Node, SiblingsContext> siblingContextCache,
+			Dictionary<Node, PointContext> pointContextCntOnlyCache,
 			PointContext core = null,
 			List<AncestorsContextElement> cachedAncestorsContext = null)
 		{
@@ -596,13 +598,13 @@ namespace Land.Markup.Binding
 
 			if (closestArgs != null && core.ClosestContext == null)
 			{
-				core.ClosestContext = GetClosestContext(node, file, core, closestArgs, visitorCache, ancestorToSiblingsCache, siblingContextCache);
+				core.ClosestContext = GetClosestContext(node, file, core, closestArgs, visitorCache, ancestorToSiblingsCache, siblingContextCache, pointContextCntOnlyCache);
 			}
 
 			/// Конструируем контекст соседей, если его нет или если он создан в упрощённом порядке
 			if (siblingsArgs != null && (core.SiblingsContext == null || core.SiblingsContext.IsSimplified))
 			{
-				core.SiblingsContext = GetSiblingsContext(node, file, siblingsArgs, ancestorToSiblingsCache, visitorCache, siblingContextCache);
+				core.SiblingsContext = GetSiblingsContext(node, file, siblingsArgs, ancestorToSiblingsCache, visitorCache, siblingContextCache, pointContextCntOnlyCache);
 
 				#region Old
 
@@ -965,10 +967,11 @@ namespace Land.Markup.Binding
 			SiblingsConstructionArgs args,
 			Dictionary<Node, SiblingsContextConstructionCache> ancestorToSiblingsCache,
 			Dictionary<string, GroupNodesByTypeVisitor> visitorCache,
-			Dictionary<Node, SiblingsContext> siblingContextCache)
+			Dictionary<Node, SiblingsContext> siblingContextCache,
+			Dictionary<Node, PointContext> pointContextCntOnlyCache)
 		{
 			using (var scope = Tracing.Tracer.BuildSpan($"GetSiblingsContext {node.Children[0].ToString()}").StartActive())
-				return GetSiblingsContextHelp(node, file, args, ancestorToSiblingsCache, visitorCache, siblingContextCache);
+				return GetSiblingsContextHelp(node, file, args, ancestorToSiblingsCache, visitorCache, siblingContextCache, pointContextCntOnlyCache);
 		}
 
 		public static SiblingsContext GetSiblingsContextHelp(
@@ -977,7 +980,8 @@ namespace Land.Markup.Binding
 			SiblingsConstructionArgs args,
 			Dictionary<Node, SiblingsContextConstructionCache> ancestorToSiblingsCache,
 			Dictionary<string, GroupNodesByTypeVisitor> visitorCache,
-			Dictionary<Node, SiblingsContext> siblingContextCache
+			Dictionary<Node, SiblingsContext> siblingContextCache,
+			Dictionary<Node, PointContext> pointContextCntOnlyCache
 			)
 		{
 			List<BorderPoint> neighbours = null;
@@ -1143,30 +1147,33 @@ namespace Land.Markup.Binding
 				.Where(e => e.Node.Location != null)
 				.ToList();
 
+			PointContext getCtx(BorderPoint e)
+			{
+				if (!pointContextCntOnlyCache.TryGetValue(e.Node, out var ctx))
+				{
+					var siblingArgs = new SiblingsConstructionArgs
+					{
+						ContextFinder = args.ContextFinder,
+						CountOnly = true
+					};
+					ctx = args.ContextFinder.ContextManager.GetContext(e.Node, file, siblingArgs, null, visitorCache, ancestorToSiblingsCache, siblingContextCache, pointContextCntOnlyCache);
+					pointContextCntOnlyCache[e.Node] = ctx;
+				}
+				return ctx;
+			}
+
 			var context = new SiblingsContext
 			{
 				Before = !args.CountOnly ? new SiblingsContextPart
 				{
 					All = checkAllSiblings ? new TextOrHash(beforeBuilder.ToString()) : null,
-					Nearest = beforeNeighbors.Take(MAX_COUNT).Select(e =>
-						args.ContextFinder.ContextManager.GetContext(e.Node, file, new SiblingsConstructionArgs
-						{
-							ContextFinder = args.ContextFinder,
-							CountOnly = true
-						}, null, visitorCache, ancestorToSiblingsCache, siblingContextCache)
-					).ToList()
+					Nearest = beforeNeighbors.Take(MAX_COUNT).Select(e => getCtx(e)).ToList()
 				} : null,
 
 				After = !args.CountOnly ? new SiblingsContextPart
 				{
 					All = checkAllSiblings ? new TextOrHash(afterBuilder.ToString()) : null,
-					Nearest = afterNeighbours.Take(MAX_COUNT).Select(e =>
-						args.ContextFinder.ContextManager.GetContext(e.Node, file, new SiblingsConstructionArgs
-						{
-							ContextFinder = args.ContextFinder,
-							CountOnly = true
-						}, null, visitorCache, ancestorToSiblingsCache, siblingContextCache)
-					).ToList()
+					Nearest = afterNeighbours.Take(MAX_COUNT).Select(e => getCtx(e)).ToList()
 				} : null,
 
 				CountBefore = beforeNeighbors.Count,
@@ -1196,11 +1203,12 @@ namespace Land.Markup.Binding
 			ClosestConstructionArgs args,
 			Dictionary<string, GroupNodesByTypeVisitor> visitorCache,
 			Dictionary<Node, SiblingsContextConstructionCache> ancestorToSiblingsCache,
-			Dictionary<Node, SiblingsContext> siblingContextCache
+			Dictionary<Node, SiblingsContext> siblingContextCache,
+			Dictionary<Node, PointContext> pointContextCntOnlyCache
 			)
 		{
 			using (var scope = Tracing.Tracer.BuildSpan($"GetClosestContext {node.Children[0]}").StartActive())
-				return GetClosestContextHelp(node, file, nodeContext, args, ancestorToSiblingsCache, visitorCache, scope.Span, siblingContextCache);
+				return GetClosestContextHelp(node, file, nodeContext, args, ancestorToSiblingsCache, visitorCache, scope.Span, siblingContextCache, pointContextCntOnlyCache);
 		}
 
 		public static HashSet<PointContext> GetClosestContextHelp(
@@ -1211,7 +1219,8 @@ namespace Land.Markup.Binding
 			Dictionary<Node, SiblingsContextConstructionCache> ancestorToSiblingsCache,
 			Dictionary<string, GroupNodesByTypeVisitor> visitorCache,
 			ISpan span,
-			Dictionary<Node, SiblingsContext> siblingContextCache
+			Dictionary<Node, SiblingsContext> siblingContextCache,
+			Dictionary<Node, PointContext> pointContextCntOnlyCache
 			)
 		{
 			//const double CLOSE_ELEMENT_THRESHOLD = 0.7;
@@ -1327,7 +1336,7 @@ namespace Land.Markup.Binding
 			{
 				if (!siblingContextCache.TryGetValue(node, out var siblingCtx))
 				{
-					siblingCtx = GetSiblingsContext(elem.Node, elem.File, args.SiblingsArgs, ancestorToSiblingsCache, visitorCache, siblingContextCache);
+					siblingCtx = GetSiblingsContext(elem.Node, elem.File, args.SiblingsArgs, ancestorToSiblingsCache, visitorCache, siblingContextCache, pointContextCntOnlyCache);
 					siblingContextCache[node] = siblingCtx;
 				}
 
@@ -1457,24 +1466,22 @@ namespace Land.Markup.Binding
 
 		public TextOrHash(string text)
 		{
-			using (var scope = Tracing.Tracer.BuildSpan("TextOrHash").StartActive())
+			text = Preprocess(text);
+
+			TextLength = text.Length;
+
+			/// Хэш от строки можем посчитать, только если длина строки
+			/// больше заданной константы
+			if (text.Length > FuzzyHashing.MIN_TEXT_LENGTH)
 			{
-				text = Preprocess(text);
-
-				TextLength = text.Length;
-
-				/// Хэш от строки можем посчитать, только если длина строки
-				/// больше заданной константы
-				if (text.Length > FuzzyHashing.MIN_TEXT_LENGTH)
-				{
-					Hash = FuzzyHashing.GetFuzzyHash(text);
-				}
-
-				if (text.Length <= MAX_TEXT_LENGTH)
-				{
-					Text = text;
-				}
+				Hash = FuzzyHashing.GetFuzzyHash(text);
 			}
+
+			if (text.Length <= MAX_TEXT_LENGTH)
+			{
+				Text = text;
+			}
+
 		}
 
 		public static string Preprocess(string text) =>
