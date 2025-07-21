@@ -7,6 +7,7 @@ using Land.Markup.CoreExtension;
 using System.Threading.Tasks;
 using System.Diagnostics;
 using Land.Core;
+using Land.Control;
 
 namespace Land.Markup.Binding
 {
@@ -256,7 +257,7 @@ namespace Land.Markup.Binding
 							if (checkSiblings)
 							{
 								candidate.Context.SiblingsContext = PointContext.GetSiblingsContext(
-									n, 
+									n,
 									currentFile,
 									siblingsArgs,
 									ancestorToSiblingsCache,
@@ -295,7 +296,7 @@ namespace Land.Markup.Binding
 			List<RemapCandidateInfo> candidates,
 			SearchType searchType)
 		{
-			if(candidates.Count == 0)
+			if (candidates.Count == 0)
 			{
 				return points.ToDictionary(e => e, e => new List<RemapCandidateInfo>());
 			}
@@ -315,7 +316,7 @@ namespace Land.Markup.Binding
 					.ToList()
 				: new List<PointContext>();
 
-			if(checkSiblings)
+			if (checkSiblings)
 			{
 				foreach (var context in contextsToPoints.Keys)
 				{
@@ -418,7 +419,7 @@ namespace Land.Markup.Binding
 				Parallel.ForEach(
 					evaluated.Keys.ToList(),
 					key => ComputeTotalSimilarities(key, evaluated[key])
-				);		
+				);
 			}
 			else
 			{
@@ -454,8 +455,8 @@ namespace Land.Markup.Binding
 			file.Root.Accept(visitor);
 
 			return visitor.Grouped.ToDictionary(
-				e=>e.Key, 
-				e=>e.Value
+				e => e.Key,
+				e => e.Value
 					.SelectMany(n => new List<BorderPoint>
 					{
 						new BorderPoint
@@ -480,7 +481,7 @@ namespace Land.Markup.Binding
 			Dictionary<PointContext, List<RemapCandidateInfo>> evaluationResults)
 		{
 			/// Для старого алгоритма сортируем один раз
-			if(UseOldApproach)
+			if (UseOldApproach)
 			{
 				Parallel.ForEach(
 					evaluationResults.Keys.ToList(),
@@ -553,7 +554,7 @@ namespace Land.Markup.Binding
 						/// и этот элемент не похож в большей степени на что-то другое
 						if (IsSimilarEnough(first)
 							&& AreDistantEnough(first, second, GAP_MAX)
-							&& (otherBestMatch == null 
+							&& (otherBestMatch == null
 								|| AreDistantEnough(first.Similarity.Value, otherBestMatch.Value, GAP_MAX)))
 						{
 							first.IsAuto = true;
@@ -612,7 +613,6 @@ namespace Land.Markup.Binding
 				Levenshtein(point.HeaderContext.NonCore, candidate.Context.HeaderContext.NonCore);
 			candidate.HeaderCoreSimilarity =
 				Levenshtein(point.HeaderContext.Core, candidate.Context.HeaderContext.Core);
-
 			candidate.AncestorSimilarity =
 				Levenshtein(point.AncestorsContext, candidate.Context.AncestorsContext);
 			candidate.InnerSimilarity =
@@ -671,7 +671,7 @@ namespace Land.Markup.Binding
 				return;
 			}
 
-			foreach(var candidate in actualCandidates)
+			foreach (var candidate in actualCandidates)
 			{
 				candidate.Similarity = null;
 			}
@@ -705,7 +705,7 @@ namespace Land.Markup.Binding
 
 			foreach (var h in ScoringHeuristics)
 			{
-				 h.PredictSimilarity(sourceContext, actualCandidates);
+				h.PredictSimilarity(sourceContext, actualCandidates);
 			}
 		}
 
@@ -848,7 +848,8 @@ namespace Land.Markup.Binding
 			}
 
 			/// Для каждой строки вычисляем контекст строки и считаем похожести на искомую строку
-			var lines = rawLines.Select((e, i) => {
+			var lines = rawLines.Select((e, i) =>
+			{
 				var location = new SegmentLocation
 				{
 					Start = new PointLocation(outerNode.Location.Start.Line + i, 0, currentOffset),
@@ -876,7 +877,7 @@ namespace Land.Markup.Binding
 			var orderedByInner = lines.OrderByDescending(l => l.InnerSimilarity).ToList();
 
 			/// Признак того, что можно перепутать искомую строчку с какой-то другой
-			var mayBeConfusedByInner = context.HadSame 
+			var mayBeConfusedByInner = context.HadSame
 				|| orderedByInner.TakeWhile(e => !AreDistantEnough(orderedByInner[0].InnerSimilarity, e.InnerSimilarity, GAP_MAX)).Count() > 1;
 
 			var innerWeight = mayBeConfusedByInner ? MIN_WEIGHT : MAX_WEIGHT;
@@ -889,7 +890,7 @@ namespace Land.Markup.Binding
 				.OrderByDescending(l => totalSimilarities[l])
 				.ToList();
 
-			return lines.Select(e=>(e.Context, e.Location, totalSimilarities[e])).ToList();
+			return lines.Select(e => (e.Context, e.Location, totalSimilarities[e])).ToList();
 		}
 
 		#region EvalSimilarity
@@ -910,14 +911,14 @@ namespace Land.Markup.Binding
 
 		public double EvalSimilarity(AncestorsContextElement a, AncestorsContextElement b)
 		{
-			return a.Type == b.Type 
-				? Levenshtein(a.HeaderContext.Sequence, b.HeaderContext.Sequence) 
+			return a.Type == b.Type
+				? Levenshtein(a.HeaderContext.Sequence, b.HeaderContext.Sequence)
 				: double.MinValue;
 		}
 
 		public double EvalSimilarity(PrioritizedWord a, PrioritizedWord b)
 		{
-			return a.Priority == b.Priority 
+			return a.Priority == b.Priority
 				? Levenshtein(a.Text, b.Text, true)
 				: double.MinValue;
 		}
@@ -974,7 +975,7 @@ namespace Land.Markup.Binding
 		}
 
 		///  Похожесть на основе расстояния Левенштейна
-		private double Levenshtein<T>(IEnumerable<T> a, IEnumerable<T> b)
+		private double Levenshtein_old2<T>(IEnumerable<T> a, IEnumerable<T> b)
 		{
 			if (a.Count() == 0 ^ b.Count() == 0)
 				return 0;
@@ -1077,7 +1078,110 @@ namespace Land.Markup.Binding
 			return 1 - distances[a.Count(), b.Count()] / denominator;
 		}
 
-		private double Levenshtein(string a, string b, bool areWords = false)
+
+		private double Levenshtein<T>(IEnumerable<T> seqA, IEnumerable<T> seqB)
+		{
+			// ---------- 0. Материализация ----------
+			var aOrig = seqA as IList<T> ?? seqA.ToArray();
+			var bOrig = seqB as IList<T> ?? seqB.ToArray();
+			int lenA0 = aOrig.Count, lenB0 = bOrig.Count;
+
+			if (lenA0 == 0 && lenB0 == 0) return 1;
+			if (lenA0 == 0 || lenB0 == 0) return 0;
+
+			// ---------- 1. Denominator на ПОЛНОМ наборе элементов ----------
+			double denominator;
+			double[] wAfull, wBfull;
+
+			if (typeof(T) == typeof(HeaderContextElement))
+			{
+				var cmp = new EqualsIgnoreValueComparer();
+
+				var aSock = aOrig.Cast<IEqualsIgnoreValue>()
+						 .GroupBy(e => e, cmp)
+						 .ToDictionary(g => (HeaderContextElement)g.Key, g => g.Count(), cmp);
+
+				var bSock = bOrig.Cast<IEqualsIgnoreValue>()
+						 .GroupBy(e => e, cmp)
+						 .ToDictionary(g => (HeaderContextElement)g.Key, g => g.Count(), cmp);
+
+				denominator = 0;
+				foreach (var kv in aSock)
+					denominator += ((HeaderContextElement)kv.Key).Priority * kv.Value;
+
+				foreach (var kv in aSock)
+					if (bSock.TryGetValue(kv.Key, out int c))
+						bSock[kv.Key] = c - kv.Value;
+
+				denominator += bSock.Where(kv => kv.Value > 0)
+						     .Sum(kv => ((HeaderContextElement)kv.Key).Priority * kv.Value);
+
+				wAfull = aOrig.Select(e => ((HeaderContextElement)(object)e).Priority).ToArray();
+				wBfull = bOrig.Select(e => ((HeaderContextElement)(object)e).Priority).ToArray();
+			}
+			else if (typeof(T) == typeof(PrioritizedWord))
+			{
+				var aSock = aOrig.Cast<PrioritizedWord>()
+						 .GroupBy(p => p.Priority)
+						 .ToDictionary(g => g.Key, g => g.Count());
+
+				var bSock = bOrig.Cast<PrioritizedWord>()
+						 .GroupBy(p => p.Priority)
+						 .ToDictionary(g => g.Key, g => g.Count());
+
+				denominator = 0;
+				foreach (var kv in aSock)
+					denominator += kv.Key * Math.Max(kv.Value,
+							   bSock.TryGetValue(kv.Key, out var vc) ? vc : 0);
+
+				wAfull = aOrig.Select(e => (((PrioritizedWord)(object)e).Priority)).ToArray();
+				wBfull = bOrig.Select(e => (((PrioritizedWord)(object)e).Priority)).ToArray();
+			}
+			else
+			{
+				denominator = Math.Max(lenA0, lenB0);         // как в оригинале
+				wAfull = Enumerable.Repeat(1.0, lenA0).ToArray();
+				wBfull = Enumerable.Repeat(1.0, lenB0).ToArray();
+			}
+
+			// ---------- 2. Отбрасываем общий префикс/суффикс ----------
+			int s = 0, eA = lenA0, eB = lenB0;
+			while (s < eA && s < eB && aOrig[s].Equals(bOrig[s])) s++;
+			while (eA > s && eB > s && aOrig[eA - 1].Equals(bOrig[eB - 1])) { eA--; eB--; }
+
+			int lenA = eA - s, lenB = eB - s;
+			if (lenA == 0 && lenB == 0) return 1;
+
+			Span<double> wA = wAfull.AsSpan(s, lenA);
+			Span<double> wB = wBfull.AsSpan(s, lenB);
+
+			// ---------- 3. Одномерный Wagner–Fischer ----------
+			Span<double> prev = stackalloc double[lenB + 1];
+			Span<double> curr = stackalloc double[lenB + 1];
+
+			prev[0] = 0;
+			for (int j = 1; j <= lenB; j++) prev[j] = prev[j - 1] + wB[j - 1];
+
+			for (int i = 1; i <= lenA; i++)
+			{
+				curr[0] = prev[0] + wA[i - 1];
+				for (int j = 1; j <= lenB; j++)
+				{
+					double cost = 1.0 - DispatchLevenshtein(aOrig[s + i - 1],
+										bOrig[s + j - 1]);
+					double del = prev[j] + wA[i - 1];
+					double ins = curr[j - 1] + wB[j - 1];
+					double sub = prev[j - 1] + wA[i - 1] * cost;
+					curr[j] = Math.Min(Math.Min(del, ins), sub);
+				}
+				var tmp = prev;
+				prev = curr;
+				curr = tmp;
+			}
+			return 1.0 - prev[lenB] / denominator;
+		}
+
+		private double Levenshtein_old(string a, string b, bool areWords = false)
 		{
 			if (a.Length == 0 ^ b.Length == 0)
 				return 0;
@@ -1127,10 +1231,72 @@ namespace Land.Markup.Binding
 
 			var similarity = 1 - distances[a.Length, b.Length] / denominator;
 
-			return areWords 
-				? similarity >= 0.5 ? similarity : 0 
+			return areWords
+				? similarity >= 0.5 ? similarity : 0
 				: similarity;
 		}
+
+		/// Быстрое расстояние Левенштейна (Wagner-Fischer с «скользящим» окном)
+		/// Возвращает similarity ∈ [0;1]. При areWords==true применяется порог 0.5.
+		private double Levenshtein(string a, string b, bool areWords = false)
+		{
+			// 1. Быстрые ответы на тривиальные случаи
+			if (string.IsNullOrEmpty(a) && string.IsNullOrEmpty(b)) return 1;   // обе пустые
+			if (a.Length == 0 || b.Length == 0) return 0;           // одна пустая
+
+			int maxLen = Math.Max(a.Length, b.Length);
+
+			// 2. Отбрасываем общие префикс и суффикс БЕЗ выделения новых строк
+			int start = 0, aEnd = a.Length, bEnd = b.Length;
+
+			while (start < aEnd && start < bEnd && a[start] == b[start]) start++;
+			while (aEnd > start && bEnd > start && a[aEnd - 1] == b[bEnd - 1])
+			{ aEnd--; bEnd--; }
+
+			// После обрезки строки могут оказаться полностью равными
+			int aCoreLen = aEnd - start;
+			int bCoreLen = bEnd - start;
+			if (aCoreLen == 0 && bCoreLen == 0) return 1;
+
+			// знаменатель формулы similarity
+
+			// 3. Выделяем только две строки динамики
+			//   stackalloc выгоден для небольших входов (≈ до 256–512)
+			Span<int> prev = bCoreLen + 1 <= 512
+			    ? stackalloc int[bCoreLen + 1]
+			    : new int[bCoreLen + 1];
+			Span<int> curr = bCoreLen + 1 <= 512
+			    ? stackalloc int[bCoreLen + 1]
+			    : new int[bCoreLen + 1];
+
+			for (int j = 0; j <= bCoreLen; j++) prev[j] = j;
+
+			// 4. Основной цикл по символам a
+			for (int i = 1; i <= aCoreLen; i++)
+			{
+				curr[0] = i;
+				int aCh = a[start + i - 1];
+
+				for (int j = 1; j <= bCoreLen; j++)
+				{
+					int cost = aCh == b[start + j - 1] ? 0 : 1;
+					int del = prev[j] + 1;  // удаление
+					int ins = curr[j - 1] + 1;  // вставка
+					int sub = prev[j - 1] + cost; // замена
+					curr[j] = Math.Min(Math.Min(del, ins), sub);
+				}
+				//(prev, curr) = (curr, prev);     // «скользим» окна
+				var tmp = prev;
+				prev = curr;
+				curr = tmp;
+			}
+
+			double similarity = 1.0 - prev[bCoreLen] / (double)maxLen;
+			return areWords ? (similarity >= 0.5 ? similarity : 0) : similarity;
+		}
+
+
+
 
 		private static double PriorityCoefficient(object elem)
 		{
@@ -1161,7 +1327,7 @@ namespace Land.Markup.Binding
 				.SkipWhile(c => !LINE_END_SYMBOLS.Contains(c))
 				.TakeWhile(c => LINE_END_SYMBOLS.Contains(c))
 			);
-			
+
 			return !String.IsNullOrEmpty(lineEnd)
 				? lineEnd : DEFAULT_LINE_END;
 		}
@@ -1171,7 +1337,7 @@ namespace Land.Markup.Binding
 
 		public static bool AreDistantEnough(RemapCandidateInfo first, RemapCandidateInfo second, double? staticGap = null) =>
 			/// Либо у нас один кандидат
-			second == null 
+			second == null
 			/// Либо первый похож на 100%, а второй - нет
 			|| first.Similarity == 1 && second.Similarity != 1
 			/// Либо оба не похожи на 100% и достаточно отстоят друг от друга

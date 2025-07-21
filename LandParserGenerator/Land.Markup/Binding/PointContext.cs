@@ -1254,7 +1254,7 @@ namespace Land.Markup.Binding
 						File = file,
 						Context = args.ContextFinder.ContextManager.GetContext(n, file)
 					})
-				);
+			);
 			};
 
 			#region For simple rebinding
@@ -1290,7 +1290,8 @@ namespace Land.Markup.Binding
 
 			#endregion
 
-			args.ContextFinder.ComputeCoreContextSimilarities(nodeContext, candidates);
+			using (var scope = Tracing.Tracer.BuildSpan($"ComputeCoreContextSimilarities {candidates.Count}").StartActive())
+				args.ContextFinder.ComputeCoreContextSimilarities(nodeContext, candidates);
 			args.ContextFinder.ComputeTotalSimilarities(nodeContext, candidates);
 
 			var result = new List<RemapCandidateInfo>();

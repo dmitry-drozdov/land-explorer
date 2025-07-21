@@ -89,6 +89,11 @@ namespace Land.Control
 
 					Debug($"start adding concern {i + 1} / {coll.Count}");
 
+					/*if (i > 10)
+					{
+						return;
+					}*/
+
 
 					using (var scope = Tracing.Tracer.BuildSpan("AddConcernPoint").StartActive())
 						MarkupManager.AddConcernPoint(

@@ -230,26 +230,24 @@ namespace Land.Markup
 				ContextFinder = ContextFinder
 			};
 
-			PointContext context;
-			using (var scope = Tracing.Tracer.BuildSpan("GetContext_inside").StartActive())
-			{
-				context = ContextFinder.ContextManager.GetContext(
-					node,
-					file,
-					siblingsArgs,
-					new ClosestConstructionArgs
-					{
-						SearchArea = new List<ParsedFile> { file },
-						GetParsed = ContextFinder.GetParsed,
-						ContextFinder = ContextFinder,
-						SiblingsArgs = siblingsArgs
-					},
-					visitorCache,
-					ancestorToSiblingsCache,
-					siblingContextCache,
-					pointContextCntOnlyCache
-				);
-			}
+
+			var context = ContextFinder.ContextManager.GetContext(
+				node,
+				file,
+				siblingsArgs,
+				new ClosestConstructionArgs
+				{
+					SearchArea = new List<ParsedFile> { file },
+					GetParsed = ContextFinder.GetParsed,
+					ContextFinder = ContextFinder,
+					SiblingsArgs = siblingsArgs
+				},
+				visitorCache,
+				ancestorToSiblingsCache,
+				siblingContextCache,
+				pointContextCntOnlyCache
+			);
+
 			var lineContext = line != null
 				? new LineContext(node.Location, line, file.Text)
 				: null;
