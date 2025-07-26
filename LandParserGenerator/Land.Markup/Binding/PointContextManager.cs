@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -50,10 +51,11 @@ namespace Land.Markup.Binding
 			Dictionary<string, GroupNodesByTypeVisitor> visitorCache,
 			Dictionary<Node, SiblingsContextConstructionCache> ancestorToSiblingsCache,
 			Dictionary<Node, SiblingsContext> siblingContextCache,
-			Dictionary<Node, PointContext> pointContextCntOnlyCache
+			Dictionary<Node, PointContext> pointContextCntOnlyCache,
+			ConcurrentDictionary<CommutativePair<Guid>, Similarity> similarityCache
 		)
 		{
-			return PointContext.GetExtendedContext(node, file, siblingsArgs, closestArgs, visitorCache, ancestorToSiblingsCache, siblingContextCache, pointContextCntOnlyCache,GetContext(node, file), null);
+			return PointContext.GetExtendedContext(node, file, siblingsArgs, closestArgs, visitorCache, ancestorToSiblingsCache, siblingContextCache, pointContextCntOnlyCache, similarityCache, GetContext(node, file), null);
 		}
 
 		public void ClearCache(string fileName)

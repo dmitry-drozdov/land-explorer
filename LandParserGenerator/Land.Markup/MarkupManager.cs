@@ -12,6 +12,7 @@ using Land.Markup.Tree;
 using Land.Markup.CoreExtension;
 using Land.Core.Specification;
 using Land.Control;
+using System.Collections.Concurrent;
 
 namespace Land.Markup
 {
@@ -206,6 +207,7 @@ namespace Land.Markup
 			Dictionary<string, GroupNodesByTypeVisitor> visitorCache = null,
 			Dictionary<Node, SiblingsContext> siblingContextCache = null,
 			Dictionary<Node, PointContext> pointContextCntOnlyCache = null,
+			ConcurrentDictionary<CommutativePair<Guid>, Similarity> similarityCache = null,
 			bool refresh = true)
 		{
 			if (remap) Remap(node.Type, file, true);
@@ -220,6 +222,9 @@ namespace Land.Markup
 
 			if (pointContextCntOnlyCache == null)
 				pointContextCntOnlyCache = new Dictionary<Node, PointContext>();
+
+			if (similarityCache == null)
+				similarityCache = new ConcurrentDictionary<CommutativePair<Guid>, Similarity>();
 
 			var parent = targetElement is ConcernPoint concernPoint
 				? concernPoint.Parent
@@ -245,7 +250,8 @@ namespace Land.Markup
 				visitorCache,
 				ancestorToSiblingsCache,
 				siblingContextCache,
-				pointContextCntOnlyCache
+				pointContextCntOnlyCache,
+				similarityCache
 			);
 
 			var lineContext = line != null
@@ -317,7 +323,8 @@ namespace Land.Markup
 								new Dictionary<string, GroupNodesByTypeVisitor>(),
 								new Dictionary<Node, SiblingsContextConstructionCache>(),
 								new Dictionary<Node, SiblingsContext>(),
-								new Dictionary<Node, PointContext>()
+								new Dictionary<Node, PointContext>(),
+								new ConcurrentDictionary<CommutativePair<Guid>, Similarity>()
 							),
 							node.Location,
 							null,
@@ -355,7 +362,8 @@ namespace Land.Markup
 							new Dictionary<string, GroupNodesByTypeVisitor>(),
 							new Dictionary<Node, SiblingsContextConstructionCache>(),
 							new Dictionary<Node, SiblingsContext>(),
-							new Dictionary<Node, PointContext>()
+							new Dictionary<Node, PointContext>(),
+							new ConcurrentDictionary<CommutativePair<Guid>, Similarity>()
 						),
 						node.Location,
 						null,
@@ -524,7 +532,8 @@ namespace Land.Markup
 					new Dictionary<string, GroupNodesByTypeVisitor>(),
 					new Dictionary<Node, SiblingsContextConstructionCache>(),
 					new Dictionary<Node, SiblingsContext>(),
-					new Dictionary<Node, PointContext>()
+					new Dictionary<Node, PointContext>(),
+					new ConcurrentDictionary<CommutativePair<Guid>, Similarity>()
 				),
 				node.Location,
 				lineLocation != null ? new LineContext(node.Location, lineLocation, file.Text) : null,
@@ -558,7 +567,8 @@ namespace Land.Markup
 				new Dictionary<string, GroupNodesByTypeVisitor>(),
 				new Dictionary<Node, SiblingsContextConstructionCache>(),
 				new Dictionary<Node, SiblingsContext>(),
-				new Dictionary<Node, PointContext>()
+				new Dictionary<Node, PointContext>(),
+				new ConcurrentDictionary<CommutativePair<Guid>, Similarity>()
 			);
 
 			var (lineContext, lineLocation, totalSimilarity) = point.LineContext != null

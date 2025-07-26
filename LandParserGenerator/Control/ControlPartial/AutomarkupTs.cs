@@ -10,6 +10,7 @@ using Land.Markup.Tree;
 using Microsoft.Win32;
 using System;
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
@@ -69,6 +70,7 @@ namespace Land.Control
 				var ancestorToSiblingsCache = new Dictionary<Node, SiblingsContextConstructionCache>();
 				var pointContextCntOnlyCache = new Dictionary<Node, PointContext>();
 				var siblingContextCache = new Dictionary<Node, SiblingsContext>();
+				var similarityCache = new ConcurrentDictionary<CommutativePair<Guid>, Similarity>();
 				var coll = funcsAndTypes.Funcs.OfType<ExistingConcernPointCandidate>().ToList();
 				for (int i = 0; i < coll.Count; i++)
 				{
@@ -109,6 +111,7 @@ namespace Land.Control
 							visitorCache,
 							siblingContextCache,
 							pointContextCntOnlyCache,
+							similarityCache,
 							refresh: i == coll.Count - 1
 						);
 

@@ -8,6 +8,8 @@ using System.Threading.Tasks;
 using System.Diagnostics;
 using Land.Core;
 using Land.Control;
+using System.Collections.Concurrent;
+using System.Threading;
 
 namespace Land.Markup.Binding
 {
@@ -263,7 +265,8 @@ namespace Land.Markup.Binding
 									ancestorToSiblingsCache,
 									visitorCache,
 									new Dictionary<Node, SiblingsContext>(),
-									new Dictionary<Node, PointContext>()
+									new Dictionary<Node, PointContext>(),
+									new ConcurrentDictionary<CommutativePair<Guid>, Similarity>()
 								);
 
 								candidate.Context.SiblingsContext_old = PointContext.GetSiblingsContext_old(n, currentFile, null);
@@ -607,8 +610,18 @@ namespace Land.Markup.Binding
 
 		#endregion
 
-		public void ComputeCoreSimilarities(PointContext point, RemapCandidateInfo candidate)
+		public void ComputeCoreSimilarities(PointContext point, RemapCandidateInfo candidate, ConcurrentDictionary<CommutativePair<Guid>, Similarity> similarityCache)
 		{
+			var key = new CommutativePair<Guid>(point.PointId, candidate.Node.Id);
+			if (similarityCache.TryGetValue(key, out var similarity))
+			{
+				candidate.HeaderNonCoreSimilarity = similarity.HeaderNonCoreSimilarity;
+				candidate.HeaderCoreSimilarity = similarity.HeaderCoreSimilarity;
+				candidate.AncestorSimilarity = similarity.AncestorSimilarity;
+				candidate.InnerSimilarity = similarity.InnerSimilarity;
+				return;
+			}
+
 			candidate.HeaderNonCoreSimilarity =
 				Levenshtein(point.HeaderContext.NonCore, candidate.Context.HeaderContext.NonCore);
 			candidate.HeaderCoreSimilarity =
@@ -617,15 +630,25 @@ namespace Land.Markup.Binding
 				Levenshtein(point.AncestorsContext, candidate.Context.AncestorsContext);
 			candidate.InnerSimilarity =
 				EvalSimilarity(point.InnerContext, candidate.Context.InnerContext);
+
+			similarityCache[key] = new Similarity
+			{
+				HeaderNonCoreSimilarity = candidate.HeaderNonCoreSimilarity,
+				HeaderCoreSimilarity = candidate.HeaderCoreSimilarity,
+				AncestorSimilarity = candidate.AncestorSimilarity,
+				InnerSimilarity = candidate.InnerSimilarity,
+			};
+
 		}
 
 		public List<RemapCandidateInfo> ComputeCoreContextSimilarities(
 			PointContext point,
-			List<RemapCandidateInfo> candidates)
+			List<RemapCandidateInfo> candidates,
+			ConcurrentDictionary<CommutativePair<Guid>, Similarity> similarityCache)
 		{
 			Parallel.ForEach(
 				candidates,
-				c => ComputeCoreSimilarities(point, c)
+				c => ComputeCoreSimilarities(point, c, similarityCache)
 			);
 
 			return candidates;
@@ -638,12 +661,13 @@ namespace Land.Markup.Binding
 		{
 			var actualCandidates = candidates.Where(c => !c.Deleted).ToList();
 			var checkAllSiblings = checkSiblings && (candidates.FirstOrDefault()?.Node.Options.GetNotUnique() ?? false);
+			var similarityCache = new ConcurrentDictionary<CommutativePair<Guid>, Similarity>();
 
 			Parallel.ForEach(
 				actualCandidates,
 				c =>
 				{
-					ComputeCoreSimilarities(point, c);
+					ComputeCoreSimilarities(point, c, similarityCache);
 
 					if (checkSiblings && point.SiblingsContext != null)
 					{
