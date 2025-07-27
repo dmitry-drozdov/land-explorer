@@ -70,7 +70,7 @@ namespace Land.Control
 				var ancestorToSiblingsCache = new Dictionary<Node, SiblingsContextConstructionCache>();
 				var pointContextCntOnlyCache = new Dictionary<Node, PointContext>();
 				var siblingContextCache = new Dictionary<Node, SiblingsContext>();
-				var similarityCache = new ConcurrentDictionary<CommutativePair<Guid>, Similarity>();
+				var similarityCache = new ConcurrentDictionary<CommutativePairGuid, Similarity>();
 				var coll = funcsAndTypes.Funcs.OfType<ExistingConcernPointCandidate>().ToList();
 				for (int i = 0; i < coll.Count; i++)
 				{

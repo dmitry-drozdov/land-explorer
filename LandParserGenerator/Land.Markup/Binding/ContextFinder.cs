@@ -266,7 +266,7 @@ namespace Land.Markup.Binding
 									visitorCache,
 									new Dictionary<Node, SiblingsContext>(),
 									new Dictionary<Node, PointContext>(),
-									new ConcurrentDictionary<CommutativePair<Guid>, Similarity>()
+									new ConcurrentDictionary<CommutativePairGuid, Similarity>()
 								);
 
 								candidate.Context.SiblingsContext_old = PointContext.GetSiblingsContext_old(n, currentFile, null);
@@ -610,9 +610,9 @@ namespace Land.Markup.Binding
 
 		#endregion
 
-		public void ComputeCoreSimilarities(PointContext point, RemapCandidateInfo candidate, ConcurrentDictionary<CommutativePair<Guid>, Similarity> similarityCache)
+		public void ComputeCoreSimilarities(PointContext point, RemapCandidateInfo candidate, ConcurrentDictionary<CommutativePairGuid, Similarity> similarityCache)
 		{
-			var key = new CommutativePair<Guid>(point.PointId, candidate.Node.Id);
+			var key = new CommutativePairGuid(point.PointId, candidate.Node.Id);
 			if (similarityCache.TryGetValue(key, out var similarity))
 			{
 				candidate.HeaderNonCoreSimilarity = similarity.HeaderNonCoreSimilarity;
@@ -621,6 +621,7 @@ namespace Land.Markup.Binding
 				candidate.InnerSimilarity = similarity.InnerSimilarity;
 				return;
 			}
+
 
 			candidate.HeaderNonCoreSimilarity =
 				Levenshtein(point.HeaderContext.NonCore, candidate.Context.HeaderContext.NonCore);
@@ -644,7 +645,7 @@ namespace Land.Markup.Binding
 		public List<RemapCandidateInfo> ComputeCoreContextSimilarities(
 			PointContext point,
 			List<RemapCandidateInfo> candidates,
-			ConcurrentDictionary<CommutativePair<Guid>, Similarity> similarityCache)
+			ConcurrentDictionary<CommutativePairGuid, Similarity> similarityCache)
 		{
 			Parallel.ForEach(
 				candidates,
@@ -661,7 +662,7 @@ namespace Land.Markup.Binding
 		{
 			var actualCandidates = candidates.Where(c => !c.Deleted).ToList();
 			var checkAllSiblings = checkSiblings && (candidates.FirstOrDefault()?.Node.Options.GetNotUnique() ?? false);
-			var similarityCache = new ConcurrentDictionary<CommutativePair<Guid>, Similarity>();
+			var similarityCache = new ConcurrentDictionary<CommutativePairGuid, Similarity>();
 
 			Parallel.ForEach(
 				actualCandidates,

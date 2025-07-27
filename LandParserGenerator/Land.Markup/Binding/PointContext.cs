@@ -575,7 +575,7 @@ namespace Land.Markup.Binding
 			Dictionary<Node, SiblingsContextConstructionCache> ancestorToSiblingsCache,
 			Dictionary<Node, SiblingsContext> siblingContextCache,
 			Dictionary<Node, PointContext> pointContextCntOnlyCache,
-			ConcurrentDictionary<CommutativePair<Guid>, Similarity> similarityCache,
+			ConcurrentDictionary<CommutativePairGuid, Similarity> similarityCache,
 			PointContext core = null,
 			List<AncestorsContextElement> cachedAncestorsContext = null)
 		{
@@ -592,7 +592,7 @@ namespace Land.Markup.Binding
 			Dictionary<string, GroupNodesByTypeVisitor> visitorCache,
 			Dictionary<Node, SiblingsContext> siblingContextCache,
 			Dictionary<Node, PointContext> pointContextCntOnlyCache,
-			ConcurrentDictionary<CommutativePair<Guid>, Similarity> similarityCache,
+			ConcurrentDictionary<CommutativePairGuid, Similarity> similarityCache,
 			PointContext core = null,
 			List<AncestorsContextElement> cachedAncestorsContext = null)
 		{
@@ -974,7 +974,7 @@ namespace Land.Markup.Binding
 			Dictionary<string, GroupNodesByTypeVisitor> visitorCache,
 			Dictionary<Node, SiblingsContext> siblingContextCache,
 			Dictionary<Node, PointContext> pointContextCntOnlyCache,
-			ConcurrentDictionary<CommutativePair<Guid>, Similarity> similarityCache)
+			ConcurrentDictionary<CommutativePairGuid, Similarity> similarityCache)
 		{
 			using (var scope = Tracing.Tracer.BuildSpan($"GetSiblingsContext {node.Children[0].ToString()}").StartActive())
 				return GetSiblingsContextHelp(node, file, args, ancestorToSiblingsCache, visitorCache, siblingContextCache, pointContextCntOnlyCache, similarityCache);
@@ -988,7 +988,7 @@ namespace Land.Markup.Binding
 			Dictionary<string, GroupNodesByTypeVisitor> visitorCache,
 			Dictionary<Node, SiblingsContext> siblingContextCache,
 			Dictionary<Node, PointContext> pointContextCntOnlyCache,
-			ConcurrentDictionary<CommutativePair<Guid>, Similarity> similarityCache
+			ConcurrentDictionary<CommutativePairGuid, Similarity> similarityCache
 			)
 		{
 			List<BorderPoint> neighbours = null;
@@ -1212,7 +1212,7 @@ namespace Land.Markup.Binding
 			Dictionary<Node, SiblingsContextConstructionCache> ancestorToSiblingsCache,
 			Dictionary<Node, SiblingsContext> siblingContextCache,
 			Dictionary<Node, PointContext> pointContextCntOnlyCache,
-			ConcurrentDictionary<CommutativePair<Guid>, Similarity> similarityCache
+			ConcurrentDictionary<CommutativePairGuid, Similarity> similarityCache
 			)
 		{
 			using (var scope = Tracing.Tracer.BuildSpan($"GetClosestContext {node.Children[0]}").StartActive())
@@ -1229,7 +1229,7 @@ namespace Land.Markup.Binding
 			ISpan span,
 			Dictionary<Node, SiblingsContext> siblingContextCache,
 			Dictionary<Node, PointContext> pointContextCntOnlyCache,
-			ConcurrentDictionary<CommutativePair<Guid>, Similarity> similarityCache
+			ConcurrentDictionary<CommutativePairGuid, Similarity> similarityCache
 			)
 		{
 			//const double CLOSE_ELEMENT_THRESHOLD = 0.7;

@@ -52,7 +52,7 @@ namespace Land.Markup.Binding
 			Dictionary<Node, SiblingsContextConstructionCache> ancestorToSiblingsCache,
 			Dictionary<Node, SiblingsContext> siblingContextCache,
 			Dictionary<Node, PointContext> pointContextCntOnlyCache,
-			ConcurrentDictionary<CommutativePair<Guid>, Similarity> similarityCache
+			ConcurrentDictionary<CommutativePairGuid, Similarity> similarityCache
 		)
 		{
 			return PointContext.GetExtendedContext(node, file, siblingsArgs, closestArgs, visitorCache, ancestorToSiblingsCache, siblingContextCache, pointContextCntOnlyCache, similarityCache, GetContext(node, file), null);
