@@ -579,7 +579,7 @@ namespace Land.Markup.Binding
 			PointContext core = null,
 			List<AncestorsContextElement> cachedAncestorsContext = null)
 		{
-			using (var scope = Tracing.Tracer.BuildSpan("GetExtendedContext").StartActive())
+			using (var scope = Tracing.Tracer.BuildSpan($"GetExtendedContext {node.Children[0].ToString()}").StartActive())
 				return GetExtendedContextHelp(node, file, siblingsArgs, closestArgs, ancestorToSiblingsCache, visitorCache, siblingContextCache, pointContextCntOnlyCache, similarityCache, core, cachedAncestorsContext);
 		}
 
@@ -1154,6 +1154,7 @@ namespace Land.Markup.Binding
 				.Where(e => e.Node.Location != null)
 				.ToList();
 
+
 			PointContext getCtx(BorderPoint e)
 			{
 				if (!pointContextCntOnlyCache.TryGetValue(e.Node, out var ctx))
@@ -1166,6 +1167,12 @@ namespace Land.Markup.Binding
 					ctx = args.ContextFinder.ContextManager.GetContext(e.Node, file, siblingArgs, null, visitorCache, ancestorToSiblingsCache, siblingContextCache, pointContextCntOnlyCache, similarityCache);
 					pointContextCntOnlyCache[e.Node] = ctx;
 				}
+				else
+				{
+					using (var scope = Tracing.Tracer.BuildSpan($"GetExtendedContext CACHE {e.Node.Children[0].ToString()}").StartActive())
+						_ = 0; // just track span
+				}
+
 				return ctx;
 			}
 
@@ -1344,12 +1351,16 @@ namespace Land.Markup.Binding
 
 			foreach (var elem in result)
 			{
-				if (!siblingContextCache.TryGetValue(node, out var siblingCtx))
+				if (!siblingContextCache.TryGetValue(elem.Node, out var siblingCtx))
 				{
 					siblingCtx = GetSiblingsContext(elem.Node, elem.File, args.SiblingsArgs, ancestorToSiblingsCache, visitorCache, siblingContextCache, pointContextCntOnlyCache, similarityCache);
-					siblingContextCache[node] = siblingCtx;
+					siblingContextCache[elem.Node] = siblingCtx;
 				}
-
+				else
+				{
+					using (var scope = Tracing.Tracer.BuildSpan($"GetSiblingsContext CACHE {elem.Node.Children[0].ToString()}").StartActive())
+						_ = 0; // just track span
+				}
 				elem.Context.SiblingsContext = siblingCtx;
 			}
 
