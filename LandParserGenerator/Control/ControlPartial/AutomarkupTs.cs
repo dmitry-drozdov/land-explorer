@@ -1,4 +1,5 @@
-﻿using Land.Control.Helpers;
+﻿using Land.Control.ControlPartial;
+using Land.Control.Helpers;
 using Land.Control.Models;
 using Land.Control.Properties;
 using Land.Core;
@@ -47,6 +48,8 @@ namespace Land.Control
 			var groups = new Dictionary<string, List<Concern>>(); // functionality name -> group (concern) in markup
 			var gqlTypesConcernCandidate = new Dictionary<string, ExistingConcernPointCandidate>();
 
+			var cachePerFile = new Dictionary<ParsedFile, Cache>();	
+
 			var d = new ResourceStats();
 
 			foreach (var file in gqlFiles)
@@ -66,11 +69,9 @@ namespace Land.Control
 
 				d.Start("markGQL");
 				var funcsAndTypes = GetGraphqlFuncsAndTypes(pFile, gqlFuncs, gqlTypes);
-				var visitorCache = new Dictionary<string, GroupNodesByTypeVisitor>();
-				var ancestorToSiblingsCache = new Dictionary<Node, SiblingsContextConstructionCache>();
-				var pointContextCntOnlyCache = new Dictionary<Node, PointContext>();
-				var siblingContextCache = new Dictionary<Node, SiblingsContext>();
-				var similarityCache = new ConcurrentDictionary<CommutativePairGuid, Similarity>();
+				var cache = new Cache();
+				cachePerFile[pFile] = cache;
+
 				var coll = funcsAndTypes.Funcs.OfType<ExistingConcernPointCandidate>().ToList();
 				for (int i = 0; i < coll.Count; i++)
 				{
@@ -107,11 +108,11 @@ namespace Land.Control
 							group,
 							false,
 							0,
-							ancestorToSiblingsCache,
-							visitorCache,
-							siblingContextCache,
-							pointContextCntOnlyCache,
-							similarityCache,
+							cache.ancestorToSiblingsCache,
+							cache.visitorCache,
+							cache.siblingContextCache,
+							cache.pointContextCntOnlyCache,
+							cache.similarityCache,
 							refresh: i == coll.Count - 1
 						);
 
@@ -162,6 +163,9 @@ namespace Land.Control
 						groups.Add(resolver.Name, new List<Concern>() { group });
 
 						Debug($"Adding gql schema {c.ParsedFile.Name} {c.ViewHeader}");
+
+						var cache = cachePerFile[c.ParsedFile];
+
 						MarkupManager.AddConcernPoint(
 							c.Node,
 							null,
@@ -170,6 +174,12 @@ namespace Land.Control
 							"graphql schema",
 							group,
 							false,
+							0,
+							cache.ancestorToSiblingsCache,
+							cache.visitorCache,
+							cache.siblingContextCache,
+							cache.pointContextCntOnlyCache,
+							cache.similarityCache,
 							refresh: false
 						);
 						target = group;

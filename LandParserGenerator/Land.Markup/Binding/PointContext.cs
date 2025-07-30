@@ -405,6 +405,7 @@ namespace Land.Markup.Binding
 		public Node Ancestor { get; set; }
 		public List<Node> Siblings { get; set; }
 		public Dictionary<string, List<BorderPoint>> Neighbours { get; set; }
+		public Dictionary<Node, List<BorderPoint>> NeighboursByNode { get; set; }
 	}
 
 	public class BorderPoint
@@ -980,6 +981,7 @@ namespace Land.Markup.Binding
 				return GetSiblingsContextHelp(node, file, args, ancestorToSiblingsCache, visitorCache, siblingContextCache, pointContextCntOnlyCache, similarityCache);
 		}
 
+
 		public static SiblingsContext GetSiblingsContextHelp(
 			Node node,
 			ParsedFile file,
@@ -992,11 +994,12 @@ namespace Land.Markup.Binding
 			)
 		{
 			List<BorderPoint> neighbours = null;
+			List<BorderPoint> neighboursForNode = null;
 
 
 			/// Находим островного родителя
 			var ancestor = PointContext.GetAncestor(node)
-				?? (node != file.Root ? file.Root : null);
+				       ?? (node != file.Root ? file.Root : null);
 
 			/// Если при подъёме дошли до неостровного корня, 
 			/// и сам элемент является этим корнем
@@ -1019,9 +1022,10 @@ namespace Land.Markup.Binding
 
 			ancestorToSiblingsCache.TryGetValue(ancestor, out SiblingsContextConstructionCache cache);
 
-			if (cache?.Neighbours != null && cache.Neighbours.ContainsKey(node.Type))
+			if (cache?.Neighbours != null && cache.Neighbours.ContainsKey(node.Type) && cache.NeighboursByNode != null)
 			{
 				neighbours = cache.Neighbours[node.Type];
+				neighboursForNode = cache.NeighboursByNode[node];
 			}
 			else
 			{
@@ -1039,6 +1043,7 @@ namespace Land.Markup.Binding
 
 
 				neighbours = visitor.BorderPoints[node.Type];
+				neighboursForNode = visitor.BorderPointsByNode[node];
 
 				if (cache != null)
 				{
@@ -1048,16 +1053,16 @@ namespace Land.Markup.Binding
 					}
 
 					cache.Neighbours[node.Type] = neighbours;
+					cache.NeighboursByNode = visitor.BorderPointsByNode;
 				}
 			}
 
-			var markedElementIndicesInNeighbours = neighbours
+			var markedElementIndicesInNeighbours = neighboursForNode
 				.Select((n, i) => new { Element = n, Index = i })
-				.Where(e => e.Element.Node == node)
 				.ToList();
 
+
 			var checkAllSiblings = node.Options.GetNotUnique();
-			const int MAX_COUNT = 1;
 
 			List<Node> siblings = null;
 
@@ -1143,16 +1148,37 @@ namespace Land.Markup.Binding
 				}
 			}
 
-			var beforeNeighbors = neighbours
-				.Take(markedElementIndicesInNeighbours[0].Index)
-				.Reverse()
-				.Where(e => e.Node.Location != null)
-				.ToList();
+			/*List<BorderPoint> beforeNeighbors, afterNeighbours;
+			beforeNeighbors = neighbours
+			       .Take(markedElementIndicesInNeighbours[0].Index)
+			       .Reverse()
+			       .Where(e => e.Node.Location != null)
+			       .ToList();
 
-			var afterNeighbours = neighbours
+			afterNeighbours = neighbours
 				.Skip(markedElementIndicesInNeighbours[1].Index + 1)
 				.Where(e => e.Node.Location != null)
-				.ToList();
+				.ToList();*/
+
+			var beforeNeighbors = new List<BorderPoint>();
+			var afterNeighbours = new List<BorderPoint>();
+
+			BorderPoint bN = null;
+			BorderPoint aN = null;
+			if (markedElementIndicesInNeighbours[0].Index - 1 < neighbours.Count && markedElementIndicesInNeighbours[0].Index - 1 >= 0)
+			{
+				bN = neighbours[markedElementIndicesInNeighbours[0].Index - 1];
+			}
+			if (markedElementIndicesInNeighbours[1].Index + 1 < neighbours.Count)
+			{
+				aN = neighbours[markedElementIndicesInNeighbours[1].Index + 1];
+			}
+
+
+			if (bN != null)
+				beforeNeighbors.Add(bN);
+			if (aN != null)
+				afterNeighbours.Add(aN);
 
 
 			PointContext getCtx(BorderPoint e)
@@ -1166,11 +1192,12 @@ namespace Land.Markup.Binding
 					};
 					ctx = args.ContextFinder.ContextManager.GetContext(e.Node, file, siblingArgs, null, visitorCache, ancestorToSiblingsCache, siblingContextCache, pointContextCntOnlyCache, similarityCache);
 					pointContextCntOnlyCache[e.Node] = ctx;
+
 				}
 				else
 				{
-					using (var scope = Tracing.Tracer.BuildSpan($"GetExtendedContext CACHE {e.Node.Children[0].ToString()}").StartActive())
-						_ = 0; // just track span
+					//using (var scope = Tracing.Tracer.BuildSpan($"GetExtendedContext CACHE {e.Node.Children[0].ToString()}").StartActive())
+					//	_ = 0; // just track span
 				}
 
 				return ctx;
@@ -1181,13 +1208,13 @@ namespace Land.Markup.Binding
 				Before = !args.CountOnly ? new SiblingsContextPart
 				{
 					All = checkAllSiblings ? new TextOrHash(beforeBuilder.ToString()) : null,
-					Nearest = beforeNeighbors.Take(MAX_COUNT).Select(e => getCtx(e)).ToList()
+					Nearest = beforeNeighbors.Select(e => getCtx(e)).ToList()
 				} : null,
 
 				After = !args.CountOnly ? new SiblingsContextPart
 				{
 					All = checkAllSiblings ? new TextOrHash(afterBuilder.ToString()) : null,
-					Nearest = afterNeighbours.Take(MAX_COUNT).Select(e => getCtx(e)).ToList()
+					Nearest = afterNeighbours.Select(e => getCtx(e)).ToList()
 				} : null,
 
 				CountBefore = beforeNeighbors.Count,
@@ -1334,7 +1361,7 @@ namespace Land.Markup.Binding
 			//	.TakeWhile(c => c.Similarity >= CLOSE_ELEMENT_THRESHOLD)
 			//	.ToList();
 
-			if (mayBeConfused.Any() && result.Any())
+			if (mayBeConfused.Count > 0 && result.Count > 0)
 			{
 				/// Если мы не захватили тот элемент, 
 				/// с которым можно перепутать помечаемый
@@ -1358,8 +1385,8 @@ namespace Land.Markup.Binding
 				}
 				else
 				{
-					using (var scope = Tracing.Tracer.BuildSpan($"GetSiblingsContext CACHE {elem.Node.Children[0].ToString()}").StartActive())
-						_ = 0; // just track span
+					//using (var scope = Tracing.Tracer.BuildSpan($"GetSiblingsContext CACHE {elem.Node.Children[0].ToString()}").StartActive())
+					//	_ = 0; // just track span
 				}
 				elem.Context.SiblingsContext = siblingCtx;
 			}

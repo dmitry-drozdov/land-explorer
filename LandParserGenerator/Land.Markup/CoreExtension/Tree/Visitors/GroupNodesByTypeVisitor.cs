@@ -10,6 +10,7 @@ namespace Land.Markup.CoreExtension
 	{
 		public Dictionary<string, List<Node>> Grouped { get; set; } = new Dictionary<string, List<Node>>();
 		public Dictionary<string, List<BorderPoint>> BorderPoints { get; set; } = new Dictionary<string, List<BorderPoint>>();
+		public Dictionary<Node, List<BorderPoint>> BorderPointsByNode { get; set; } = new Dictionary<Node, List<BorderPoint>>();
 
 		public GroupNodesByTypeVisitor(IEnumerable<string> targetTypes)
 		{
@@ -41,19 +42,36 @@ namespace Land.Markup.CoreExtension
 		{
 			foreach (var g in Grouped)
 			{
-				BorderPoints[g.Key] = g.Value.SelectMany(e => new List<BorderPoint>
+				var lst = new List<BorderPoint>();
+				foreach (var node in g.Value)
 				{
-					new BorderPoint
+					var start = new BorderPoint
 					{
-						Node = e,
-						Offset = e.Location.Start.Offset,
-					},
-					new BorderPoint
+						Node = node,
+						Offset = node.Location.Start.Offset,
+					};
+					var end = new BorderPoint
 					{
-						Node = e,
-						Offset = e.Location.End.Offset,
-					},
-				}).OrderBy(e => e.Offset).ToList();
+						Node = node,
+						Offset = node.Location.End.Offset,
+					};
+
+					lst.Add(start);
+					lst.Add(end);
+
+					if (BorderPointsByNode.TryGetValue(node, out var points))
+					{
+						points.Add(start);
+						points.Add(end);
+					}
+					else
+					{
+						points = new List<BorderPoint> { start, end };
+						BorderPointsByNode.Add(node, points);
+					}
+				}
+
+				BorderPoints[g.Key] = lst.OrderBy(e => e.Offset).ToList();
 			}
 		}
 	}
