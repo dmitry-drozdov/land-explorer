@@ -624,9 +624,9 @@ namespace Land.Markup.Binding
 
 
 			candidate.HeaderNonCoreSimilarity =
-				Levenshtein(point.HeaderContext.NonCore, candidate.Context.HeaderContext.NonCore);
+				LevenshteinHeaderContextElement(point.HeaderContext.NonCore, candidate.Context.HeaderContext.NonCore);
 			candidate.HeaderCoreSimilarity =
-				Levenshtein(point.HeaderContext.Core, candidate.Context.HeaderContext.Core);
+				LevenshteinHeaderContextElement(point.HeaderContext.Core, candidate.Context.HeaderContext.Core);
 			candidate.AncestorSimilarity =
 				Levenshtein(point.AncestorsContext, candidate.Context.AncestorsContext);
 			candidate.InnerSimilarity =
@@ -647,8 +647,13 @@ namespace Land.Markup.Binding
 			List<RemapCandidateInfo> candidates,
 			ConcurrentDictionary<CommutativePairGuid, Similarity> similarityCache)
 		{
+			var options = new ParallelOptions
+			{
+				MaxDegreeOfParallelism = Environment.ProcessorCount
+			};
 			Parallel.ForEach(
 				candidates,
+				options,
 				c => ComputeCoreSimilarities(point, c, similarityCache)
 			);
 
@@ -1103,6 +1108,77 @@ namespace Land.Markup.Binding
 			return 1 - distances[a.Count(), b.Count()] / denominator;
 		}
 
+		private double LevenshteinHeaderContextElement(List<HeaderContextElement> seqA, List<HeaderContextElement> seqB)
+		{
+			// ---------- 0. Материализация ----------
+			var aOrig = seqA;
+			var bOrig = seqB;
+			int lenA0 = aOrig.Count, lenB0 = bOrig.Count;
+
+			if (lenA0 == 0 && lenB0 == 0) return 1;
+			if (lenA0 == 0 || lenB0 == 0) return 0;
+
+			// ---------- 1. Denominator на ПОЛНОМ наборе элементов ----------
+			double denominator;
+			double[] wAfull, wBfull;
+
+			var cmp = new EqualsIgnoreValueComparer();
+
+			var aSock = aOrig.GroupBy(e => e, cmp).ToDictionary(g => g.Key, g => g.Count(), cmp);
+
+			var bSock = bOrig.GroupBy(e => e, cmp).ToDictionary(g => g.Key, g => g.Count(), cmp);
+
+			denominator = 0;
+			foreach (var kv in aSock)
+				denominator += ((HeaderContextElement)kv.Key).Priority * kv.Value;
+
+			foreach (var kv in aSock)
+				if (bSock.TryGetValue(kv.Key, out int c))
+					bSock[kv.Key] = c - kv.Value;
+
+			denominator += bSock.Where(kv => kv.Value > 0)
+					     .Sum(kv => ((HeaderContextElement)kv.Key).Priority * kv.Value);
+
+			wAfull = aOrig.Select(e => e.Priority).ToArray();
+			wBfull = bOrig.Select(e => e.Priority).ToArray();
+
+
+			// ---------- 2. Отбрасываем общий префикс/суффикс ----------
+			int s = 0, eA = lenA0, eB = lenB0;
+			while (s < eA && s < eB && aOrig[s].Equals(bOrig[s])) s++;
+			while (eA > s && eB > s && aOrig[eA - 1].Equals(bOrig[eB - 1])) { eA--; eB--; }
+
+			int lenA = eA - s, lenB = eB - s;
+			if (lenA == 0 && lenB == 0) return 1;
+
+			Span<double> wA = wAfull.AsSpan(s, lenA);
+			Span<double> wB = wBfull.AsSpan(s, lenB);
+
+			// ---------- 3. Одномерный Wagner–Fischer ----------
+			Span<double> prev = stackalloc double[lenB + 1];
+			Span<double> curr = stackalloc double[lenB + 1];
+
+			prev[0] = 0;
+			for (int j = 1; j <= lenB; j++)
+				prev[j] = prev[j - 1] + wB[j - 1];
+
+			for (int i = 1; i <= lenA; i++)
+			{
+				curr[0] = prev[0] + wA[i - 1];
+				for (int j = 1; j <= lenB; j++)
+				{
+					double cost = 1.0 - EvalSimilarity(aOrig[s + i - 1], bOrig[s + j - 1]);
+					double del = prev[j] + wA[i - 1];
+					double ins = curr[j - 1] + wB[j - 1];
+					double sub = prev[j - 1] + wA[i - 1] * cost;
+					curr[j] = Math.Min(Math.Min(del, ins), sub);
+				}
+				var tmp = prev;
+				prev = curr;
+				curr = tmp;
+			}
+			return 1.0 - prev[lenB] / denominator;
+		}
 
 		private double Levenshtein<T>(IEnumerable<T> seqA, IEnumerable<T> seqB)
 		{
