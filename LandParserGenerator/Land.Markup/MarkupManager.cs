@@ -13,6 +13,7 @@ using Land.Markup.CoreExtension;
 using Land.Core.Specification;
 using Land.Control;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 
 namespace Land.Markup
 {
@@ -546,12 +547,18 @@ namespace Land.Markup
 		/// <summary>
 		/// Смена узла, к которому привязана точка
 		/// </summary>
-		public void RelinkConcernPoint(ConcernPoint point, RemapCandidateInfo candidate)
+		public void RelinkConcernPoint(ConcernPoint point, RemapCandidateInfo candidate, Dictionary<ParsedFile, Cache> cacheByFile)
 		{
 			var siblingsArgs = new SiblingsConstructionArgs
 			{
 				ContextFinder = ContextFinder
 			};
+
+			if (!cacheByFile.TryGetValue(candidate.File, out var cache))
+			{
+				cache = new Cache();
+				cacheByFile[candidate.File] = cache;
+			}
 
 			var context = ContextFinder.ContextManager.GetContext(
 				candidate.Node,
@@ -564,11 +571,11 @@ namespace Land.Markup
 					ContextFinder = ContextFinder,
 					SiblingsArgs = siblingsArgs
 				},
-				new Dictionary<string, GroupNodesByTypeVisitor>(),
-				new Dictionary<Node, SiblingsContextConstructionCache>(),
-				new Dictionary<Node, SiblingsContext>(),
-				new Dictionary<Node, PointContext>(),
-				new ConcurrentDictionary<CommutativePairGuid, Similarity>()
+				cache.visitorCache,
+				cache.ancestorToSiblingsCache,
+				cache.siblingContextCache,
+				cache.pointContextCntOnlyCache,
+				cache.similarityCache
 			);
 
 			var (lineContext, lineLocation, totalSimilarity) = point.LineContext != null
@@ -975,7 +982,8 @@ namespace Land.Markup
 			return ContextFinder.FindPoints(
 				new List<ConcernPoint> { point },
 				new List<ParsedFile> { targetInfo },
-				ContextFinder.SearchType.Local
+				ContextFinder.SearchType.Local,
+				new Dictionary<ParsedFile, Cache>()
 			)[point];
 		}
 
@@ -1022,10 +1030,12 @@ namespace Land.Markup
 			var ambiguous = new Dictionary<ConcernPoint, List<RemapCandidateInfo>>();
 			var points = GetConcernPoints();
 
+			var cacheByFile = new Dictionary<ParsedFile, Cache>();
+
 			/// Локальный поиск имеет смысл проводить, если только его провести и нужно,
 			/// или если нужен глобальный поиск, но разрешена автоперепривязка
 			var result = allowAutoDecisions || searchType == ContextFinder.SearchType.Local
-				? ContextFinder.FindPoints(points, searchArea, ContextFinder.SearchType.Local)
+				? ContextFinder.FindPoints(points, searchArea, ContextFinder.SearchType.Local, cacheByFile)
 				: new Dictionary<ConcernPoint, List<RemapCandidateInfo>>();
 
 			/// Если требуется глобальный поиск, 
@@ -1038,7 +1048,7 @@ namespace Land.Markup
 					.Select(e => e.Key)
 				).ToList();
 
-				var globalResult = ContextFinder.FindPoints(points, searchArea, ContextFinder.SearchType.Global);
+				var globalResult = ContextFinder.FindPoints(points, searchArea, ContextFinder.SearchType.Global, cacheByFile);
 
 				foreach (var key in globalResult.Keys)
 				{
@@ -1053,8 +1063,9 @@ namespace Land.Markup
 					.Take(AmbiguityTopCount).ToList();
 
 				if (!allowAutoDecisions ||
-					!ApplyCandidate(kvp.Key, candidates))
+					!ApplyCandidate(kvp.Key, candidates, cacheByFile))
 					ambiguous[kvp.Key] = candidates;
+
 			}
 
 			OnMarkupChanged?.Invoke();
@@ -1082,11 +1093,16 @@ namespace Land.Markup
 
 			var ambiguous = new Dictionary<ConcernPoint, List<RemapCandidateInfo>>();
 
+			var cacheByFile = new Dictionary<ParsedFile, Cache>();
+
 			var result = ContextFinder.FindPoints(
 				points,
 				new List<ParsedFile> { file },
-				ContextFinder.SearchType.Local
+				ContextFinder.SearchType.Local,
+				cacheByFile
 			);
+
+
 
 			foreach (var key in result.Keys.ToList())
 			{
@@ -1095,7 +1111,7 @@ namespace Land.Markup
 					.Take(AmbiguityTopCount)
 					.ToList();
 
-				if (!allowAutoDecisions || !ApplyCandidate(key, result[key]))
+				if (!allowAutoDecisions || !ApplyCandidate(key, result[key], cacheByFile))
 				{
 					ambiguous[key] = result[key];
 				}
@@ -1108,13 +1124,14 @@ namespace Land.Markup
 
 		private bool ApplyCandidate(
 			ConcernPoint point,
-			IEnumerable<RemapCandidateInfo> candidates)
+			IEnumerable<RemapCandidateInfo> candidates,
+			Dictionary<ParsedFile, Cache> cacheByFile)
 		{
 			var first = candidates.FirstOrDefault();
 
 			if (first?.IsAuto ?? false)
 			{
-				RelinkConcernPoint(point, first);
+				RelinkConcernPoint(point, first, cacheByFile);
 				return true;
 			}
 			else

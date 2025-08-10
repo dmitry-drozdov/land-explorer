@@ -12,12 +12,16 @@ namespace Land.Markup.Binding
 			PointContext point,
 			List<RemapCandidateInfo> candidates);
 
+		RemapCandidateInfo GetSameElementSlow(
+			PointContext point,
+			List<RemapCandidateInfo> candidates);
+
 		RemapCandidateInfo GetSameElement_old(
 			PointContext point,
 			List<RemapCandidateInfo> candidates);
 	}
 
-	public class ContextsEqualityHeuristic: IPreHeuristic
+	public class ContextsEqualityHeuristic : IPreHeuristic
 	{
 		private static readonly Func<PointContext, PointContext, bool> HeaderCorePredicate = (a, b) =>
 			a.HeaderContext.Core.SequenceEqual(b.HeaderContext.Core);
@@ -30,12 +34,131 @@ namespace Land.Markup.Binding
 			a.AncestorsContext.SequenceEqual(b.AncestorsContext);
 
 		public RemapCandidateInfo GetSameElement(
+			    PointContext point,
+			    List<RemapCandidateInfo> candidates)
+		{
+			var basePredicates = new Func<PointContext, PointContext, bool>[]
+			{
+				HeaderCorePredicate,
+				HeaderSequencePredicate,
+				InnerPredicate
+			};
+
+			// Определяем базовый индекс предиката
+			int? baseIdx = point.HeaderContext.Core.Count > 0
+			    ? 0 : point.HeaderContext.NonCore.Count > 0
+				? 1 : point.InnerContext.Content?.TextLength > 0
+				    ? 2 : (int?)null;
+
+			if (!baseIdx.HasValue)
+			{
+				return null;
+			}
+
+			// Обработка ClosestContext
+			List<PointContext> wereAlmostSame = new List<PointContext>();
+			if (point.ClosestContext != null)
+			{
+				// Фильтрация AncestorsSequencePredicate
+				foreach (var e in point.ClosestContext)
+				{
+					if (AncestorsSequencePredicate(e, point))
+					{
+						wereAlmostSame.Add(e);
+					}
+				}
+
+				// Последовательное применение предикатов
+				for (int i = baseIdx.Value; i < basePredicates.Length; i++)
+				{
+					var nextList = new List<PointContext>();
+					var predicate = basePredicates[i];
+					foreach (var e in wereAlmostSame)
+					{
+						if (predicate(e, point))
+						{
+							nextList.Add(e);
+						}
+					}
+
+					if (nextList.Count == 0)
+					{
+						baseIdx = i; // Обновляем индекс предиката
+						wereAlmostSame.Clear();
+						break;
+					}
+					wereAlmostSame = nextList;
+				}
+			}
+
+			// Если в ClosestContext не найдено подходящих элементов
+			if (wereAlmostSame.Count == 0)
+			{
+				// Подготовка кандидатов
+				var similarCandidates = new List<RemapCandidateInfo>();
+				foreach (var c in candidates)
+				{
+					if (AncestorsSequencePredicate(c.Context, point))
+					{
+						similarCandidates.Add(c);
+					}
+				}
+
+				// Применение начальных предикатов (0..baseIdx)
+				for (int i = 0; i <= baseIdx.Value; i++)
+				{
+					var nextList = new List<RemapCandidateInfo>();
+					var predicate = basePredicates[i];
+					foreach (var c in similarCandidates)
+					{
+						if (predicate(point, c.Context)) // Важно: порядок (point, candidate)
+						{
+							nextList.Add(c);
+						}
+					}
+
+					if (nextList.Count == 0)
+						return null;
+
+					similarCandidates = nextList;
+
+					if (similarCandidates.Count <= 1)
+						return similarCandidates.FirstOrDefault();
+				}
+
+				// Применение дополнительных предикатов (baseIdx+1..end)
+				for (int i = baseIdx.Value + 1; i < basePredicates.Length; i++)
+				{
+					var nextList = new List<RemapCandidateInfo>();
+					var predicate = basePredicates[i];
+					foreach (var c in similarCandidates)
+					{
+						if (predicate(c.Context, point)) // Порядок изменен (candidate, point)
+						{
+							nextList.Add(c);
+						}
+					}
+
+					similarCandidates = nextList;
+					if (similarCandidates.Count <= 1)
+						break;
+				}
+
+				return similarCandidates.Count == 1
+				    ? similarCandidates[0]
+				    : null;
+			}
+
+			return null;
+		}
+
+		public RemapCandidateInfo GetSameElementSlow(
 			PointContext point,
 			List<RemapCandidateInfo> candidates)
 		{
-			var basePredicates = new Func<PointContext, PointContext, bool>[] 
-			{ 
-				HeaderCorePredicate, HeaderSequencePredicate, InnerPredicate 
+			var basePredicates = new Func<PointContext, PointContext, bool>[]
+			{
+				HeaderCorePredicate, HeaderSequencePredicate, InnerPredicate
 			};
 
 			/// Базовый предикат, которому должны удовлетворять похожие элементы,
@@ -64,7 +187,7 @@ namespace Land.Markup.Binding
 					.Where(e => basePredicates[i](e, point))
 					.ToList();
 
-				if(wereAlmostSame.Count == 0)
+				if (wereAlmostSame.Count == 0)
 				{
 					baseIdx = i;
 					break;
@@ -74,11 +197,11 @@ namespace Land.Markup.Binding
 			if (wereAlmostSame.Count == 0)
 			{
 				var similarCandidates = candidates
-					.Where(c => basePredicates.Take(baseIdx.Value + 1).All(p => p(point, c.Context)) 
+					.Where(c => basePredicates.Take(baseIdx.Value + 1).All(p => p(point, c.Context))
 						&& AncestorsSequencePredicate(c.Context, point))
 					.ToList();
 
-				if(similarCandidates.Count <= 1)
+				if (similarCandidates.Count <= 1)
 				{
 					return similarCandidates.FirstOrDefault();
 				}

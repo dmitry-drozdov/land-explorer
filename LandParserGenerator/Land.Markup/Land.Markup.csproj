@@ -293,6 +293,7 @@
     <Compile Include="Binding\Munkres.cs" />
     <Compile Include="Binding\PointContext.cs" />
     <Compile Include="Binding\PointContextManager.cs" />
+    <Compile Include="Cache.cs" />
     <Compile Include="CommutativePair.cs" />
     <Compile Include="Concern.cs" />
     <Compile Include="ConcernPoint.cs" />

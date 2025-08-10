@@ -1,4 +1,4 @@
-﻿using Land.Control.ControlPartial;
+﻿using Land.Control;
 using Land.Control.Helpers;
 using Land.Control.Models;
 using Land.Control.Properties;

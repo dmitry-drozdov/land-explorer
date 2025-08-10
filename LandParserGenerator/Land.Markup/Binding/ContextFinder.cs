@@ -215,11 +215,10 @@ namespace Land.Markup.Binding
 		private Dictionary<ConcernPoint, List<RemapCandidateInfo>> DoMultiTypeSearch(
 			Dictionary<string, List<ConcernPoint>> points,
 			List<ParsedFile> searchArea,
-			SearchType searchType)
+			SearchType searchType,
+			Dictionary<ParsedFile, Cache> cacheByFile)
 		{
 			var candidates = new Dictionary<string, List<RemapCandidateInfo>>();
-			var ancestorToSiblingsCache = new Dictionary<Node, SiblingsContextConstructionCache>();
-			var visitorCache = new Dictionary<string, GroupNodesByTypeVisitor>();
 
 			/// Инициализируем коллекции кандидатов для каждого типа
 			foreach (var type in points.Keys)
@@ -235,6 +234,12 @@ namespace Land.Markup.Binding
 					continue;
 				}
 
+				if (!cacheByFile.TryGetValue(currentFile, out var cache))
+				{
+					cache = new Cache();
+					cacheByFile[currentFile] = cache;
+				}
+
 
 				var visitor = new GroupNodesByTypeVisitor(points.Keys.ToList());
 				currentFile.Root.Accept(visitor);
@@ -245,7 +250,8 @@ namespace Land.Markup.Binding
 					var checkSiblings = searchType == SearchType.Local;
 					var siblingsArgs = checkSiblings ? new SiblingsConstructionArgs { ContextFinder = this } : null;
 
-					candidates[type].AddRange(visitor.Grouped[type]
+					using (var scope = Tracing.Tracer.BuildSpan($"Map candidates {visitor.Grouped[type].Count}").StartActive())
+						candidates[type].AddRange(visitor.Grouped[type]
 						.Select(n =>
 						{
 							var candidate = new RemapCandidateInfo
@@ -262,14 +268,14 @@ namespace Land.Markup.Binding
 									n,
 									currentFile,
 									siblingsArgs,
-									ancestorToSiblingsCache,
-									visitorCache,
-									new Dictionary<Node, SiblingsContext>(),
-									new Dictionary<Node, PointContext>(),
-									new ConcurrentDictionary<CommutativePairGuid, Similarity>()
+									cache.ancestorToSiblingsCache,
+									cache.visitorCache,
+									cache.siblingContextCache,
+									cache.pointContextCntOnlyCache,
+									cache.similarityCache
 								);
 
-								candidate.Context.SiblingsContext_old = PointContext.GetSiblingsContext_old(n, currentFile, null);
+								//candidate.Context.SiblingsContext_old = PointContext.GetSiblingsContext_old(n, currentFile, null);
 							}
 
 							return candidate;
@@ -283,7 +289,9 @@ namespace Land.Markup.Binding
 
 			foreach (var type in points.Keys)
 			{
-				var currentResult = DoSingleTypeSearch(points[type], candidates[type], searchType);
+				Dictionary<ConcernPoint, List<RemapCandidateInfo>> currentResult;
+				using (var scope = Tracing.Tracer.BuildSpan($"DoSingleTypeSearch {points.Keys.Count}").StartActive())
+					currentResult = DoSingleTypeSearch(points[type], candidates[type], searchType);
 
 				foreach (var kvp in currentResult)
 				{
@@ -358,7 +366,10 @@ namespace Land.Markup.Binding
 				/// если находим 100% соответствие, исключаем кандидата из списка
 				foreach (var pointContext in contextsToPoints.Keys.Concat(auxiliaryContexts))
 				{
-					var perfectMatch = PreHeuristic.GetSameElement(pointContext, candidates);
+					RemapCandidateInfo perfectMatch;
+					using (var scope = Tracing.Tracer.BuildSpan("GetSameElement").StartActive())
+						perfectMatch = PreHeuristic.GetSameElement(pointContext, candidates);
+					
 
 					if (perfectMatch != null)
 					{
@@ -807,7 +818,8 @@ namespace Land.Markup.Binding
 		public Dictionary<ConcernPoint, List<RemapCandidateInfo>> FindPoints(
 			List<ConcernPoint> points,
 			List<ParsedFile> searchArea,
-			SearchType searchType)
+			SearchType searchType,
+			Dictionary<ParsedFile, Cache> cacheByFile)
 		{
 			List<ParsedFile> files = null;
 			Dictionary<string, List<ConcernPoint>> groupedByType = null;
@@ -822,7 +834,7 @@ namespace Land.Markup.Binding
 						.ToDictionary(e => e.Key, e => e.ToList());
 					files = searchArea;
 
-					var globalResult = DoMultiTypeSearch(groupedByType, files, searchType);
+					var globalResult = DoMultiTypeSearch(groupedByType, files, searchType, cacheByFile);
 
 					foreach (var elem in globalResult)
 					{
@@ -842,7 +854,7 @@ namespace Land.Markup.Binding
 						/// При поиске в том же файле ищем тот же файл по полному совпадению пути
 						files = searchArea.Where(f => f.Name == fileName).ToList();
 
-						var localResult = DoMultiTypeSearch(groupedPoints[fileName], files, searchType);
+						var localResult = DoMultiTypeSearch(groupedPoints[fileName], files, searchType, cacheByFile);
 
 						foreach (var elem in localResult)
 						{

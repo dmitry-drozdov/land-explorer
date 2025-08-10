@@ -122,7 +122,8 @@ namespace Land.Control
 				{
 					MarkupManager.RelinkConcernPoint(
 						(parent.DataContext as RemapCandidates).Point,
-						State.SelectedItem_MissingTreeView.DataContext as RemapCandidateInfo
+						State.SelectedItem_MissingTreeView.DataContext as RemapCandidateInfo,
+						new Dictionary<ParsedFile, Cache>()
 					);
 
 					SetStatus("Точка перепривязана", ControlStatus.Success);

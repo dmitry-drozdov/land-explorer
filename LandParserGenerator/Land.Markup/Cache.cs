@@ -9,9 +9,9 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Collections.Concurrent;
 
-namespace Land.Control.ControlPartial
+namespace Land.Control
 {
-	internal class Cache
+	public class Cache
 	{
 		public Dictionary<string, GroupNodesByTypeVisitor> visitorCache;
 		public Dictionary<Node, SiblingsContextConstructionCache> ancestorToSiblingsCache;
