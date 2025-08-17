@@ -410,6 +410,10 @@
       <Project>{77cf2f7d-c132-443b-ae5f-649c632d3f9c}</Project>
       <Name>Land.Markup</Name>
     </ProjectReference>
+    <ProjectReference Include="..\VPTree\VPTree.csproj">
+      <Project>{9549263E-BE08-41F4-B72F-12F066CC7FEF}</Project>
+      <Name>VPTree</Name>
+    </ProjectReference>
   </ItemGroup>
   <ItemGroup>
     <Resource Include="Resources\AppIcon.ico" />

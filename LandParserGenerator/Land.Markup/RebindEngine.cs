@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Land.Control;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -55,7 +56,9 @@ namespace Land.Markup
 			// 1) kNN для каждой новой точки
 			foreach (var n in newAnchors)
 			{
-				var knn = _rebinder.Query(n, k); // вернёт (Anchor, Dist)[]
+				List<VPTree<MethodAnchor>.KNNResult> knn;
+				using (var scope = Tracing.Tracer.BuildSpan("kNN Query").StartActive())
+					knn = _rebinder.Query(n, k); // вернёт (Anchor, Dist)[]
 
 				var mr = new MatchResult { New = n };
 				for (int i = 0; i < knn.Count; i++)

@@ -32,6 +32,9 @@ namespace Land.Control
 {
 	public partial class LandExplorerControl : UserControl, INotifyPropertyChanged
 	{
+		MarkupGraphql markupGql1 = new MarkupGraphql();
+		MarkupGraphql markupGql2 = new MarkupGraphql();
+		int iter = 0;
 		void FillTs()
 		{
 			Tracing.Init();
@@ -52,7 +55,47 @@ namespace Land.Control
 
 			var d = new ResourceStats();
 
-			var markupGql = new MarkupGraphql();
+			MarkupGraphql markupGql = null;
+			if (iter == 0)
+			{
+				markupGql = markupGql1;
+			}
+			if (iter == 1)
+			{
+				markupGql = markupGql2;
+			}
+			if (iter == 2)
+			{
+				var matches = markupGql1.RebindToOld(markupGql2.anchors, k: 3, tau: 0.18, margin: 0.02);
+				foreach (var m in matches)
+				{
+					if (m.Status == MatchStatus.Accepted)
+					{
+						// m.New → m.Old (один-к-одному)
+						// m.BestDist, m.SecondDist для телеметрии
+						Debug($"ACEPTED {m.Old.MethodNameNorm} -> {m.New.MethodNameNorm} ");
+					}
+					else if (m.Status == MatchStatus.Ambiguous)
+					{
+						// показать m.Candidates (топ-k) пользователю для ручного выбора
+						Debug($"AMBIGUOUS ??? -> {m.New.MethodNameNorm} ");
+					}
+					else
+					{
+						// NoMatch — не нашлось ничего приличного
+						Debug($"NO MATCH ??? -> {m.New.MethodNameNorm} ");
+					}
+				}
+			}
+			iter++;
+
+			if (iter == 3)
+			{
+				markupGql1 = new MarkupGraphql();
+				markupGql2 = new MarkupGraphql();
+				iter = 0;
+				return;
+			}
 
 			foreach (var file in gqlFiles)
 			{

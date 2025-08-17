@@ -13,7 +13,7 @@ namespace VPTree
 	{
 		public sealed class Weights
 		{
-			public double NameW = 0.35;
+			public double NameW = 0.30;
 			public double ArgsW = 0.35;
 			public double ReturnsW = 0.15;
 			public double ParentW = 0.15;
@@ -82,7 +82,7 @@ namespace VPTree
 			if (n == 0) return 0.0;
 
 			double wt = 1.0, wn = 1.0;
-			double nullCost = ArgNullCost(wt, wn);
+			double nullCost = ArgNullCost(wt, 0.0); // только тип, имена не штрафуем
 
 			var C = new double[n, n];
 			for (int i = 0; i < n; i++)
@@ -96,7 +96,7 @@ namespace VPTree
 				}
 
 			double total = Hungarian.MinCost(C);
-			return total / (double)n;
+			return total / (double)(n * (wt + wn));
 		}
 
 		public static double AnchorDistance(MethodAnchor a, MethodAnchor b, Weights w)

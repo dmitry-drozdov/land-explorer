@@ -1,4 +1,5 @@
-﻿using Land.Core.Parsing.Tree;
+﻿using Land.Control;
+using Land.Core.Parsing.Tree;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -10,7 +11,7 @@ namespace Land.Markup
 {
 	public class MarkupGraphql
 	{
-		private List<MethodAnchor> _anchors = new List<MethodAnchor>();
+		public List<MethodAnchor> anchors = new List<MethodAnchor>();
 		private Dictionary<Guid, MethodAnchor> _anchorByConcernId = new Dictionary<Guid, MethodAnchor>();
 		private Rebinder _rebinder;
 		public MarkupGraphql() { }
@@ -30,15 +31,23 @@ namespace Land.Markup
 			var returnType = n.Children.Last().Children.First(y => y.ToString() != "LSB: [").ToString().Replace("id: ", "");
 
 			var anchor = MethodAnchor.FromRaw(n.Id.ToString(), name, args, new List<string> { returnType }, typeName);
-			_anchors.Add(anchor);
+			anchors.Add(anchor);
 			_anchorByConcernId[concernId] = anchor;
 		}
 
 		public void CreateRebinder()
 		{
 			var weights = new Dist.Weights();
-			_rebinder = new Rebinder(_anchors, weights);
-			AnchorsIO.SaveJson("anchors.json", _anchors);
+			_rebinder = new Rebinder(anchors, weights);
+			AnchorsIO.SaveJson("anchors.json", anchors);
 		}
+
+		public List<MatchResult> RebindToOld(IEnumerable<MethodAnchor> newAnchors, int k = 3, double tau = 0.18, double margin = 0.02)
+		{
+			var engine = new RebindEngine(_rebinder, anchors, new Dist.Weights());
+			using (var scope = Tracing.Tracer.BuildSpan("Rebind").StartActive())
+				return engine.Rebind(newAnchors, k, tau, margin);
+		}
+
 	}
 }
