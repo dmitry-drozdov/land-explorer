@@ -277,6 +277,46 @@ namespace Land.Markup
 			return point;
 		}
 
+		public Guid AddBaseConcernPoint(
+			Node node,
+			SegmentLocation line,
+			ParsedFile file,
+			string name = null,
+			string comment = null,
+			MarkupElement targetElement = null
+			)
+		{
+			var parent = targetElement is ConcernPoint concernPoint
+				? concernPoint.Parent
+				: targetElement as Concern;
+
+			var pointContext = new PointContext
+			{
+				PointId = node.Id,
+				Type = node.Alias ?? node.Symbol,
+
+				FileName = file.Name,
+				Line = node.Location.Start.Line.Value,
+				StartOffset = node.Location.Start.Offset,
+				EndOffset = node.Location.End.Offset
+			};
+
+			var point = new ConcernPoint(
+				name ?? ConcernPoint.GetDefaultName(node),
+				comment,
+				pointContext,
+				node.Location,
+				null,
+				line,
+				parent,
+				0
+			);
+
+			AddElement(point);
+
+			return point.Id;
+		}
+
 		/// <summary>
 		/// Добавление всей "суши", присутствующей в дереве разбора
 		/// </summary>

@@ -486,7 +486,7 @@ namespace Land.Markup.Binding
 		}
 
 		#endregion
-		public Guid PointId { get; private set; }
+		public Guid PointId { get;  set; }
 
 		/// <summary>
 		/// Тип сущности, которой соответствует точка привязки

@@ -52,6 +52,8 @@ namespace Land.Control
 
 			var d = new ResourceStats();
 
+			var markupGql = new MarkupGraphql();
+
 			foreach (var file in gqlFiles)
 			{
 				Debug($"parsing gql {file}");
@@ -99,7 +101,18 @@ namespace Land.Control
 
 
 					using (var scope = Tracing.Tracer.BuildSpan("AddConcernPoint").StartActive())
-						MarkupManager.AddConcernPoint(
+					{
+						var concernId = MarkupManager.AddBaseConcernPoint(
+							c.Node,
+							null,
+							pFile,
+							c.ViewHeader,
+							"graphql schema",
+							group
+						);
+						markupGql.AddAnchor(c.Node, concernId);
+					}
+						/*MarkupManager.AddConcernPoint(
 							c.Node,
 							null,
 							pFile,
@@ -114,9 +127,9 @@ namespace Land.Control
 							cache.pointContextCntOnlyCache,
 							cache.similarityCache,
 							refresh: i == coll.Count - 1
-						);
+						);*/
 
-					//Debug("end adding concern");
+						//Debug("end adding concern");
 				}
 
 				foreach (var c in funcsAndTypes.Types.OfType<ExistingConcernPointCandidate>())
@@ -131,7 +144,11 @@ namespace Land.Control
 				d.Stop("markGQL");
 			}
 
+
 			Debug($"got {gqlFuncs.Count} gql functions");
+			markupGql.CreateRebinder();
+			Debug($"rebinder created");
+
 			Debug("looking for ts resolvers...");
 
 			var resolvers = new Dictionary<TsFuncNode, List<TsFuncNode>>();
