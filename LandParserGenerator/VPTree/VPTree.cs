@@ -27,10 +27,9 @@ namespace VPTree
 		public VPTree(IList<T> items, Func<T, T, double> distance, int? seed = null)
 		{
 			if (items == null || items.Count == 0) throw new ArgumentException("items empty");
-			if (distance == null) throw new ArgumentNullException("distance");
 			_items = new List<T>(items);
-			_dist = distance;
-			_rng = new Random(seed.HasValue ? seed.Value : 42);
+			_dist = distance ?? throw new ArgumentNullException("distance");
+			_rng = new Random(seed ?? 42);
 			var idxs = Enumerable.Range(0, _items.Count).ToArray();
 			_root = Build(idxs);
 		}

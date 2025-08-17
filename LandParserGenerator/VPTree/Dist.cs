@@ -16,7 +16,7 @@ namespace VPTree
 			public double NameW = 0.35;
 			public double ArgsW = 0.35;
 			public double ReturnsW = 0.15;
-			public double ReceiverW = 0.15;
+			public double ParentW = 0.15;
 
 			public int NameScale = 8;
 			public int TypeScale = 16;
@@ -101,15 +101,15 @@ namespace VPTree
 
 		public static double AnchorDistance(MethodAnchor a, MethodAnchor b, Weights w)
 		{
-			double dName = LevScaled(a != null ? a.MethodNameNorm : "", b != null ? b.MethodNameNorm : "", w.NameScale);
-			double dArgs = ArgsDistance(a != null ? a.Args : null, b != null ? b.Args : null, w);
-			double dRet = LevScaled(a != null ? a.ReturnTypeNorm : "", b != null ? b.ReturnTypeNorm : "", w.ReturnsScale);
-			double dRecv = LevScaled(a != null ? a.ReceiverNameNorm : "", b != null ? b.ReceiverNameNorm : "", w.ReceiverScale);
+			double dName = LevScaled(a?.MethodNameNorm ?? "", b?.MethodNameNorm ?? "", w.NameScale);
+			double dArgs = ArgsDistance(a?.Args, b?.Args, w);
+			double dRet = LevScaled(a?.ReturnTypeNorm ?? "", b?.ReturnTypeNorm ?? "", w.ReturnsScale);
+			double dRecv = LevScaled(a?.ParentNameNorm ?? "", b?.ParentNameNorm ?? "", w.ReceiverScale);
 
 			return w.NameW * dName
 			     + w.ArgsW * dArgs
 			     + w.ReturnsW * dRet
-			     + w.ReceiverW * dRecv;
+			     + w.ParentW * dRecv;
 		}
 	}
 }

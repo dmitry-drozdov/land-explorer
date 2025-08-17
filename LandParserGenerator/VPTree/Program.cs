@@ -52,7 +52,7 @@ namespace VPTree
 				var k = knn[i];
 				var cand = loaded[k.Index];
 				Console.WriteLine(string.Format("#{0}: {1}  {2}  dist={3:0.0000}",
-				    i + 1, cand.Id, cand.MethodNameRaw, k.Dist));
+				    i + 1, cand.Id, cand.MethodNameNorm, k.Dist));
 			}
 		}
 	}

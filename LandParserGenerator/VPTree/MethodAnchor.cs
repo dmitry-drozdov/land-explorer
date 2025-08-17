@@ -12,9 +12,8 @@ namespace VPTree
 	public sealed class MethodAnchor
 	{
 		public string Id;
-		public string MethodNameRaw;
 		public string MethodNameNorm;
-		public string ReceiverNameNorm;   // parent type
+		public string ParentNameNorm;   // parent type
 		public string ReturnTypeNorm;     // "T1,T2" if multi
 		public List<Arg> Args;
 
@@ -29,15 +28,14 @@ namespace VPTree
 		    string methodName,
 		    IEnumerable<Tuple<string, string>> args,   // (type, name)
 		    IEnumerable<string> returns,
-		    string receiverTypeName
+		    string parentName
 		)
 		{
 			var a = new MethodAnchor
 			{
 				Id = id ?? "",
-				MethodNameRaw = methodName ?? "",
 				MethodNameNorm = NormalizeName(methodName),
-				ReceiverNameNorm = NormalizeTypeName(receiverTypeName ?? ""),
+				ParentNameNorm = NormalizeTypeName(parentName ?? ""),
 				ReturnTypeNorm = NormalizeReturnTypes(returns),
 				Args = new List<Arg>()
 			};

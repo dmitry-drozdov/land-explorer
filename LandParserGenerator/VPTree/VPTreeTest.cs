@@ -83,7 +83,7 @@ namespace Tests
 					var k = knn[i];
 					var cand = loaded[k.Index];
 					Console.WriteLine(string.Format("#{0}: {1}  {2}  dist={3:0.0000}",
-					    i + 1, cand.Id, cand.MethodNameRaw, k.Dist));
+					    i + 1, cand.Id, cand.MethodNameNorm, k.Dist));
 				}
 			}
 			finally
@@ -105,7 +105,7 @@ namespace Tests
 				NameW = nameW,
 				ArgsW = argsW,
 				ReturnsW = returnsW,
-				ReceiverW = recvW,
+				ParentW = recvW,
 			};
 		}
 
@@ -124,8 +124,8 @@ namespace Tests
 		#region 1) Имя — Levenshtein, изолировано NameW
 		[DataTestMethod]
 		[TestCategory("KNN/Name")]
-		[DataRow("FindUsr", "FindUser")]
-		[DataRow("WriteJSN", "WriteJSON")]
+		[DataRow("FindUsr", "find user")]
+		[DataRow("WriteJSN", "write json")]
 		public void Nearest_ByName_Levenshtein(string queryName, string expectedBestName)
 		{
 			var corpus = new List<MethodAnchor>
@@ -141,7 +141,7 @@ namespace Tests
 			var knn = rebinder.Query(q, 3);
 
 			var best = corpus[knn[0].Index];
-			Assert.AreEqual(expectedBestName, best.MethodNameRaw, "Ожидался ближайший по имени.");
+			Assert.AreEqual(expectedBestName, best.MethodNameNorm, "Ожидался ближайший по имени.");
 			for (int i = 1; i < knn.Count; i++) Assert.IsTrue(knn[i - 1].Dist <= knn[i].Dist);
 		}
 		#endregion
