@@ -13,10 +13,10 @@ namespace VPTree
 	{
 		public sealed class Weights
 		{
-			public double NameW = 0.30;
-			public double ArgsW = 0.35;
-			public double ReturnsW = 0.15;
-			public double ParentW = 0.15;
+			public double NameW = 0.25;
+			public double ArgsW = 0.40;
+			public double ReturnsW = 0.20;
+			public double ParentW = 0.20;
 
 			public int NameScale = 8;
 			public int TypeScale = 16;
@@ -101,10 +101,14 @@ namespace VPTree
 
 		public static double AnchorDistance(MethodAnchor a, MethodAnchor b, Weights w)
 		{
-			double dName = LevScaled(a?.MethodNameNorm ?? "", b?.MethodNameNorm ?? "", w.NameScale);
-			double dArgs = ArgsDistance(a?.Args, b?.Args, w);
-			double dRet = LevScaled(a?.ReturnTypeNorm ?? "", b?.ReturnTypeNorm ?? "", w.ReturnsScale);
-			double dRecv = LevScaled(a?.ParentNameNorm ?? "", b?.ParentNameNorm ?? "", w.ReceiverScale);
+			double dName = 0, dArgs = 0, dRet = 0, dRecv = 0;
+
+			Parallel.Invoke(
+			    () => dName = LevScaled(a?.MethodNameNorm ?? "", b?.MethodNameNorm ?? "", w.NameScale),
+			    () => dArgs = ArgsDistance(a?.Args, b?.Args, w),
+			    () => dRet = LevScaled(a?.ReturnTypeNorm ?? "", b?.ReturnTypeNorm ?? "", w.ReturnsScale),
+			    () => dRecv = LevScaled(a?.ParentNameNorm ?? "", b?.ParentNameNorm ?? "", w.ReceiverScale)
+			);
 
 			return w.NameW * dName
 			     + w.ArgsW * dArgs

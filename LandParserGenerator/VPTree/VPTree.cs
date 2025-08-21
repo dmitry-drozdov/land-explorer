@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Tasks;
 
@@ -121,27 +122,32 @@ namespace VPTree
 
 		public List<KNNResult> KNearest(T query, int k)
 		{
-			if (k <= 0) throw new ArgumentOutOfRangeException("k");
-			var heap = new MaxHeap();
+			if (k <= 0) throw new ArgumentOutOfRangeException(nameof(k));
+			var heap = new MaxHeap(initialCapacity: k);
 			double tau = double.PositiveInfinity;
+
 			SearchKNN(_root, query, k, heap, ref tau);
 
-			var res = new List<KNNResult>(heap.Count);
-			while (heap.Count > 0)
+			int n = heap.Count;
+			var arr = new KNNResult[n];
+			for (int i = n - 1; i >= 0; --i)
 			{
 				heap.Pop(out int idx, out double d);
-				res.Add(new KNNResult(idx, d));
+				arr[i] = new KNNResult(idx, d); // заполняем с конца — уже по возрастанию
 			}
-			res.Reverse();
-			return res;
+			return new List<KNNResult>(arr);
 		}
 
 		private void SearchKNN(Node node, T query, int k, MaxHeap heap, ref double tau)
 		{
 			if (node == null) return;
 
-			T vp = _items[node.Index];
-			double dist = _dist(query, vp);
+			// локальные ссылки быстрее, чем поля класса в глубокой рекурсии
+			var items = _items;
+			var distFn = _dist;
+
+			T vp = items[node.Index];
+			double dist = distFn(query, vp);
 
 			if (heap.Count < k)
 			{
@@ -155,15 +161,28 @@ namespace VPTree
 			}
 
 			double mu = node.Threshold;
-			Node first = dist < mu ? node.Left : node.Right;
-			Node second = dist < mu ? node.Right : node.Left;
 
-			if (first != null) SearchKNN(first, query, k, heap, ref tau);
+			// Выбираем «ближайшую» ветку (near) и «дальнюю» (far)
+			Node near, far;
+			if (dist < mu) { near = node.Left; far = node.Right; }
+			else { near = node.Right; far = node.Left; }
 
-			if (second != null)
+			// Сначала обходим "near" — быстрее сузим tau
+			if (near != null) SearchKNN(near, query, k, heap, ref tau);
+
+			// Для "far" используем веточные условия (без Abs)
+			if (far != null)
 			{
-				if (Math.Abs(dist - mu) <= tau)
-					SearchKNN(second, query, k, heap, ref tau);
+				if (dist < mu)
+				{
+					// Был слева от порога: условие |dist - mu| <= tau эквивалентно dist + tau >= mu
+					if (dist + tau >= mu) SearchKNN(far, query, k, heap, ref tau);
+				}
+				else
+				{
+					// Был справа: эквивалентно dist - tau <= mu
+					if (dist - tau <= mu) SearchKNN(far, query, k, heap, ref tau);
+				}
 			}
 		}
 
@@ -171,36 +190,35 @@ namespace VPTree
 		// Max-heap by distance (largest on top)
 		private sealed class MaxHeap
 		{
-			private struct Item
+			private struct Item { public int Index; public double Dist; }
+
+			private readonly List<Item> _a;
+
+			public MaxHeap(int initialCapacity = 0)
 			{
-				public int Index;
-				public double Dist;
+				_a = initialCapacity > 0 ? new List<Item>(initialCapacity) : new List<Item>();
 			}
 
-			private readonly List<Item> _a = new List<Item>();
+			public int Count => _a.Count;
 
-			public int Count { get { return _a.Count; } }
+			[MethodImpl(MethodImplOptions.AggressiveInlining)]
+			public double PeekDist() => _a[0].Dist;
 
-			public double PeekDist()
-			{
-				return _a[0].Dist;
-			}
-
+			[MethodImpl(MethodImplOptions.AggressiveInlining)]
 			public void Push(int index, double dist)
 			{
-				var it = new Item { Index = index, Dist = dist };
-				_a.Add(it);
+				_a.Add(new Item { Index = index, Dist = dist });
 				SiftUp(_a.Count - 1);
 			}
 
-			// Pop max into out params
 			public void Pop(out int index, out double dist)
 			{
 				var root = _a[0];
-				var last = _a[_a.Count - 1];
-				_a.RemoveAt(_a.Count - 1);
+				int lastIdx = _a.Count - 1;
+				var last = _a[lastIdx];
+				_a.RemoveAt(lastIdx);
 				if (_a.Count > 0) { _a[0] = last; SiftDown(0); }
-				index = root.Index;
+				index = root.Index; 
 				dist = root.Dist;
 			}
 
@@ -210,6 +228,7 @@ namespace VPTree
 				SiftDown(0);
 			}
 
+			[MethodImpl(MethodImplOptions.AggressiveInlining)]
 			private void SiftUp(int i)
 			{
 				while (i > 0)
@@ -221,6 +240,7 @@ namespace VPTree
 				}
 			}
 
+			[MethodImpl(MethodImplOptions.AggressiveInlining)]
 			private void SiftDown(int i)
 			{
 				int n = _a.Count;
@@ -235,11 +255,11 @@ namespace VPTree
 				}
 			}
 
+			[MethodImpl(MethodImplOptions.AggressiveInlining)]
 			private static int Compare(Item a, Item b)
 			{
 				int c = a.Dist.CompareTo(b.Dist);
-				if (c != 0) return c;
-				return a.Index.CompareTo(b.Index);
+				return c != 0 ? c : a.Index.CompareTo(b.Index);
 			}
 		}
 	}
