@@ -1,4 +1,6 @@
-﻿using System;
+﻿using OpenTracing;
+using OpenTracing.Util;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -16,11 +18,11 @@ namespace VPTree
 		private readonly VPTree<MethodAnchor> _tree;
 		private readonly Dist.Weights _w;
 
-		public Rebinder(IEnumerable<MethodAnchor> anchors, Dist.Weights weights)
+		public Rebinder(IEnumerable<MethodAnchor> anchors, Dist.Weights weights, GlobalTracer tracer = null)
 		{
 			_anchors = (anchors ?? new List<MethodAnchor>()).ToList();
 			_w = weights ?? new Dist.Weights();
-			_tree = new VPTree<MethodAnchor>(_anchors, (a, b) => Dist.AnchorDistance(a, b, _w), 42);
+			_tree = new VPTree<MethodAnchor>(_anchors, (a, b) => Dist.AnchorDistance(a, b, _w), 42, tracer);
 		}
 
 		public List<VPTree<MethodAnchor>.KNNResult> Query(MethodAnchor query, int k)

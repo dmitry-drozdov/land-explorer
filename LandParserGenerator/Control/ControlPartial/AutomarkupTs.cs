@@ -51,7 +51,7 @@ namespace Land.Control
 			var groups = new Dictionary<string, List<Concern>>(); // functionality name -> group (concern) in markup
 			var gqlTypesConcernCandidate = new Dictionary<string, ExistingConcernPointCandidate>();
 
-			var cachePerFile = new Dictionary<ParsedFile, Cache>();	
+			var cachePerFile = new Dictionary<ParsedFile, Cache>();
 
 			var d = new ResourceStats();
 
@@ -143,36 +143,34 @@ namespace Land.Control
 					}*/
 
 
-					using (var scope = Tracing.Tracer.BuildSpan("AddConcernPoint").StartActive())
-					{
-						var concernId = MarkupManager.AddBaseConcernPoint(
-							c.Node,
-							null,
-							pFile,
-							c.ViewHeader,
-							"graphql schema",
-							group
-						);
-						markupGql.AddAnchor(c.Node, concernId);
-					}
-						/*MarkupManager.AddConcernPoint(
-							c.Node,
-							null,
-							pFile,
-							c.ViewHeader,
-							"graphql schema",
-							group,
-							false,
-							0,
-							cache.ancestorToSiblingsCache,
-							cache.visitorCache,
-							cache.siblingContextCache,
-							cache.pointContextCntOnlyCache,
-							cache.similarityCache,
-							refresh: i == coll.Count - 1
-						);*/
+					var concernId = MarkupManager.AddBaseConcernPoint(
+						c.Node,
+						null,
+						pFile,
+						c.ViewHeader,
+						"graphql schema",
+						group
+					);
+					markupGql.AddAnchor(c.Node, concernId);
 
-						//Debug("end adding concern");
+					/*MarkupManager.AddConcernPoint(
+						c.Node,
+						null,
+						pFile,
+						c.ViewHeader,
+						"graphql schema",
+						group,
+						false,
+						0,
+						cache.ancestorToSiblingsCache,
+						cache.visitorCache,
+						cache.siblingContextCache,
+						cache.pointContextCntOnlyCache,
+						cache.similarityCache,
+						refresh: i == coll.Count - 1
+					);*/
+
+					//Debug("end adding concern");
 				}
 
 				foreach (var c in funcsAndTypes.Types.OfType<ExistingConcernPointCandidate>())
@@ -189,7 +187,8 @@ namespace Land.Control
 
 
 			Debug($"got {gqlFuncs.Count} gql functions");
-			markupGql.CreateRebinder();
+			using (var scope = Tracing.Tracer.BuildSpan("CreateRebinder").StartActive())
+				markupGql.CreateRebinder();
 			Debug($"rebinder created");
 
 			Debug("looking for ts resolvers...");

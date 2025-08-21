@@ -1,5 +1,7 @@
-﻿using Land.Control;
+﻿using Jaeger;
+using Land.Control;
 using Land.Core.Parsing.Tree;
+using OpenTracing.Util;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -38,8 +40,9 @@ namespace Land.Markup
 		public void CreateRebinder()
 		{
 			var weights = new Dist.Weights();
-			_rebinder = new Rebinder(anchors, weights);
-			AnchorsIO.SaveJson("anchors.json", anchors);
+			_rebinder = new Rebinder(anchors, weights, Tracing.Tracer as GlobalTracer);
+			using (var scope = Tracing.Tracer.BuildSpan("SaveJson").StartActive())
+				AnchorsIO.SaveJson("anchors.json", anchors);
 		}
 
 		public List<MatchResult> RebindToOld(IEnumerable<MethodAnchor> newAnchors, int k = 3, double tau = 0.18, double margin = 0.02)

@@ -40,7 +40,7 @@ namespace VPTree
 			var loaded = AnchorsIO.LoadJson("anchors.json");
 
 			var weights = new Dist.Weights();
-			var rebinder = new Rebinder(loaded, weights);
+			var rebinder = new Rebinder(loaded, weights, null);
 
 			var q = MethodAnchor.FromRaw("new#tmp", "FindUser",
 			    new[] { Tuple.Create("int", "a"), Tuple.Create("string", "b") },

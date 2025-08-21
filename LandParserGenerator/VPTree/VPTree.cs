@@ -1,9 +1,13 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Tasks;
+using OpenTracing;
+using OpenTracing.Util;
+
 
 namespace VPTree
 {
@@ -25,36 +29,51 @@ namespace VPTree
 		private readonly Node _root;
 		private readonly Random _rng;
 
-		public VPTree(IList<T> items, Func<T, T, double> distance, int? seed = null)
+		public VPTree(IList<T> items, Func<T, T, double> distance, int? seed = null, GlobalTracer tracer = null)
 		{
 			if (items == null || items.Count == 0) throw new ArgumentException("items empty");
 			_items = new List<T>(items);
 			_dist = distance ?? throw new ArgumentNullException("distance");
 			_rng = new Random(seed ?? 42);
-			var idxs = Enumerable.Range(0, _items.Count).ToArray();
-			_root = Build(idxs);
+			var idxs = Enumerable.Range(0, _items.Count).ToList();
+			using (var scope = tracer?.BuildSpan("Build").StartActive())
+				_root = Build(idxs, tracer);
 		}
 
-		private Node Build(int[] idxs)
+		private readonly object _rngLock = new object();
+
+		private Node Build(List<int> idxs, GlobalTracer tracer = null)
 		{
-			if (idxs.Length == 0) return null;
+			return BuildInternal(idxs, parallelDepth: 4, tracer: tracer);
+		}
+
+		private Node BuildInternal(List<int> idxs, int parallelDepth, GlobalTracer tracer)
+		{
+			if (idxs.Count == 0)
+				return null;
+
 			var node = new Node();
 
-			int vpPos = _rng.Next(idxs.Length);
+			int vpPos;
+			lock (_rngLock)                       // Random не потокобезопасен
+				vpPos = _rng.Next(idxs.Count);
+
 			int vpIndex = idxs[vpPos];
 			node.Index = vpIndex;
 
-			if (idxs.Length == 1)
+			if (idxs.Count == 1)
 			{
-				node.Left = null; node.Right = null; node.Threshold = 0;
+				node.Left = null; 
+				node.Right = null; 
+				node.Threshold = 0;
 				return node;
 			}
 
 			// move vp to end
-			int last = idxs.Length - 1;
+			int last = idxs.Count - 1;
 			int tmp = idxs[vpPos]; idxs[vpPos] = idxs[last]; idxs[last] = tmp;
 
-			int n = idxs.Length - 1;
+			int n = idxs.Count - 1;
 			var dists = new double[n];
 			for (int i = 0; i < n; i++)
 				dists[i] = _dist(_items[vpIndex], _items[idxs[i]]);
@@ -71,8 +90,26 @@ namespace VPTree
 				else right.Add(idxs[i]);
 			}
 
-			node.Left = Build(left.ToArray());
-			node.Right = Build(right.ToArray());
+			// Параллелим ТОЛЬКО первые два уровня (parallelDepth > 0).
+			if (parallelDepth > 0 && left.Count > 0 && right.Count > 0)
+			{
+				Node leftNode = null, rightNode = null;
+
+				Parallel.Invoke(
+				    () => leftNode = BuildInternal(left, parallelDepth - 1, tracer),
+				    () => rightNode = BuildInternal(right, parallelDepth - 1, tracer)
+				);
+
+				node.Left = leftNode;
+				node.Right = rightNode;
+			}
+			else
+			{
+				// Дальше – строго последовательно
+				node.Left = left.Count > 0 ? BuildInternal(left, 0, tracer) : null;
+				node.Right = right.Count > 0 ? BuildInternal(right, 0, tracer) : null;
+			}
+
 			return node;
 		}
 
@@ -218,7 +255,7 @@ namespace VPTree
 				var last = _a[lastIdx];
 				_a.RemoveAt(lastIdx);
 				if (_a.Count > 0) { _a[0] = last; SiftDown(0); }
-				index = root.Index; 
+				index = root.Index;
 				dist = root.Dist;
 			}
 
