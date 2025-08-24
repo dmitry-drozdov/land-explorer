@@ -49,7 +49,7 @@ namespace Land.Markup
 		/// <param name="k">сколько ближайших брать на кандидатов</param>
 		/// <param name="tau">порог «достаточно близко»</param>
 		/// <param name="margin">минимальная разница между 1-м и 2-м кандидатом</param>
-		public List<MatchResult> Rebind(IEnumerable<MethodAnchor> newAnchors, int k = 3, double tau = 0.18, double margin = 0.02)
+		public List<MatchResult> Rebind(IEnumerable<MethodAnchor> newAnchors, int k = 3, double tau = 0.20, double margin = 0.02)
 		{
 			var results = new List<MatchResult>();
 			var proposals = new List<MatchResult>();       // только те, кто «почти уверен»

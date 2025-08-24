@@ -45,7 +45,7 @@ namespace Land.Markup
 				AnchorsIO.SaveJson("anchors.json", anchors);
 		}
 
-		public List<MatchResult> RebindToOld(IEnumerable<MethodAnchor> newAnchors, int k = 3, double tau = 0.18, double margin = 0.02)
+		public List<MatchResult> RebindToOld(IEnumerable<MethodAnchor> newAnchors, int k = 3, double tau = 0.20, double margin = 0.02)
 		{
 			var engine = new RebindEngine(_rebinder, anchors, new Dist.Weights());
 			using (var scope = Tracing.Tracer.BuildSpan("Rebind").StartActive())

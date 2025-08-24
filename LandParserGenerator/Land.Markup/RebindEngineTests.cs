@@ -122,14 +122,14 @@ namespace Land.Markup
 			    };
 
 			var engine = new RebindEngine(_rebinder, _old, _w);
-			var res = engine.Rebind(newAnchors, k: 3, tau: 0.18, margin: 0.02);
+			var res = engine.Rebind(newAnchors, k: 3, tau: 0.20, margin: 0.02);
 
 			var m = FindByNewId(res, "new#2");
 			Assert.IsNotNull(m);
 			Assert.AreEqual(MatchStatus.Accepted, m.Status, "Arg reorder should be accepted");
 			Assert.IsNotNull(m.Old);
 			Assert.AreEqual("old#3", m.Old.Id, "Should map to old#3 WriteJSON");
-			Assert.IsTrue(m.BestDist <= 0.18);
+			Assert.IsTrue(m.BestDist <= 0.20);
 		}
 
 		[TestMethod]
@@ -169,12 +169,12 @@ namespace Land.Markup
 			    };
 
 			var engine = new RebindEngine(_rebinder, _old, _w);
-			var res = engine.Rebind(newAnchors, k: 3, tau: 0.18, margin: 0.02);
+			var res = engine.Rebind(newAnchors, k: 3, tau: 0.20, margin: 0.02);
 
 			var m = FindByNewId(res, "new#4");
 			Assert.IsNotNull(m);
 			Assert.AreEqual(MatchStatus.NoMatch, m.Status, "Far method should be NoMatch under strict tau");
-			Assert.IsTrue(m.BestDist > 0.18, "Best distance should exceed tau");
+			Assert.IsTrue(m.BestDist > 0.20, "Best distance should exceed tau");
 		}
 
 		[TestMethod]

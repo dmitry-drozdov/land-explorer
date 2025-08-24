@@ -66,7 +66,7 @@ namespace Land.Control
 			}
 			if (iter == 2)
 			{
-				var matches = markupGql1.RebindToOld(markupGql2.anchors, k: 3, tau: 0.18, margin: 0.02);
+				var matches = markupGql1.RebindToOld(markupGql2.anchors, k: 3, tau: 0.20, margin: 0.02);
 				foreach (var m in matches)
 				{
 					if (m.Status == MatchStatus.Accepted)
