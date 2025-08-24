@@ -1,6 +1,7 @@
 ﻿using Land.Control;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
@@ -53,8 +54,30 @@ namespace Land.Markup
 			var results = new List<MatchResult>();
 			var proposals = new List<MatchResult>();       // только те, кто «почти уверен»
 
+			// --- Wave A: точное совпадение по хешу (мгновенно) ---
+			ExactHashRebinder exact;
+			List<MatchResult> exactRes;
+
+			using (var scope = Tracing.Tracer.BuildSpan("ExactHashRebinder").StartActive())
+				exact = new ExactHashRebinder(_oldAnchors);
+			using (var scope = Tracing.Tracer.BuildSpan("RebindExact").StartActive())
+				exactRes = exact.RebindExact(newAnchors);
+
+			// Принятые и неоднозначные сразу в итог
+			foreach (var r in exactRes)
+			{
+				if (r.Status == MatchStatus.Accepted || r.Status == MatchStatus.Ambiguous)
+					results.Add(r);
+			}
+			// Останутся только те, кто реально "изменился"
+			var needKnn = exactRes.Where(r => r.Status == MatchStatus.NoMatch).Select(r => r.New).ToList();
+
+
+			Debug.WriteLine($"EXACT: {exactRes.Count - needKnn.Count}, kNN: {needKnn.Count}");
+
+
 			// 1) kNN для каждой новой точки
-			foreach (var n in newAnchors)
+			foreach (var n in needKnn)
 			{
 				List<VPTree<MethodAnchor>.KNNResult> knn;
 				using (var scope = Tracing.Tracer.BuildSpan("kNN Query").StartActive())
@@ -94,7 +117,7 @@ namespace Land.Markup
 			// Сортируем предложения по возрастанию лучшей дистанции — «самые очевидные» разбираем первыми
 			proposals.Sort((a, b) => a.BestDist.CompareTo(b.BestDist));
 
-			var takenOld = new HashSet<string>(); // Old.Id, какие уже заняты
+			var takenOld = new HashSet<string>(exact.TakenOldIds); // Old.Id, какие уже заняты
 			var finalAccepted = new List<MatchResult>();
 
 			foreach (var mr in proposals)

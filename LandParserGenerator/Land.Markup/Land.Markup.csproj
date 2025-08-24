@@ -304,6 +304,8 @@
     <Compile Include="CommutativePair.cs" />
     <Compile Include="Concern.cs" />
     <Compile Include="ConcernPoint.cs" />
+    <Compile Include="ExactHashRebinder.cs" />
+    <Compile Include="ExactHashRebinderTests.cs" />
     <Compile Include="MarkupGraphql.cs" />
     <Compile Include="RebindEngine.cs" />
     <Compile Include="RebindEngineTests.cs" />

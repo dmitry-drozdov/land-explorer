@@ -64,6 +64,7 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="AnchorKeys.cs" />
     <Compile Include="AnchorsIO.cs" />
     <Compile Include="VPTreeTest.cs" />
     <Compile Include="Dist.cs" />

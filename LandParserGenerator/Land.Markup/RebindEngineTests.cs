@@ -224,7 +224,7 @@ namespace Land.Markup
 			// Контрольная проверка сортировки кандидатов по возрастанию дистанции
 			var newAnchors = new List<MethodAnchor>
 			    {
-				NA("new#7", "ComputeHash",
+				 NA("new#7", "ComputeHsh", // одно отличие в имени, чтобы не сработал ExactHash
 				   new[] { Tuple.Create("int","a"), Tuple.Create("string","b") },
 				   new[] { "int" }, "Hasher")
 			    };
@@ -242,6 +242,29 @@ namespace Land.Markup
 				Assert.IsTrue(m.Candidates[i - 1].Dist <= m.Candidates[i].Dist + 1e-12,
 				    "Candidates must be sorted by ascending distance");
 			}
+		}
+
+		[TestMethod]
+		public void Rebind_ExactMatch_ShouldSkipKnn_AndHaveNoCandidates()
+		{
+			// Берём якорь, который ТОЧНО совпадает с одним из _old (как в Setup: ComputeHash)
+			var newAnchors = new List<MethodAnchor>
+			    {
+				NA("new_exact", "ComputeHash",
+				    new[] { Tuple.Create("int","a"), Tuple.Create("string","b") },
+				    new[] { "int" }, "Hasher")
+			    };
+
+			var engine = new RebindEngine(_rebinder, _old, _w);
+
+			var res = engine.Rebind(newAnchors, k: 3, tau: 0.5, margin: 0.01);
+
+			// Проверяем: точный матч принят на пред-фильтре и kNN не трогался
+			var m = res.Single(r => r.New.Id == "new_exact");
+			Assert.AreEqual(MatchStatus.Accepted, m.Status, "Exact совпадение должно приниматься без kNN");
+			Assert.IsNotNull(m.Old, "Должен быть выбран старый якорь");
+			Assert.AreEqual(0.0, m.BestDist, 1e-12, "BestDist для точного совпадения — 0");
+			Assert.AreEqual(0, m.Candidates.Count, "kNN не должен вызываться — список кандидатов пуст");
 		}
 	}
 }
