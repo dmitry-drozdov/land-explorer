@@ -62,6 +62,8 @@ namespace Land.Markup
 				exact = new ExactHashRebinder(_oldAnchors);
 			using (var scope = Tracing.Tracer.BuildSpan("RebindExact").StartActive())
 				exactRes = exact.RebindExact(newAnchors);
+			using (var scope = Tracing.Tracer.BuildSpan("BuildNeighborBagsForNew").StartActive())
+				MarkupGraphql.BuildNeighborBagsForNew(newAnchors);
 
 			// Принятые и неоднозначные сразу в итог
 			foreach (var r in exactRes)

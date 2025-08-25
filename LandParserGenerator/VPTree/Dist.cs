@@ -13,10 +13,11 @@ namespace VPTree
 	{
 		public sealed class Weights
 		{
-			public double NameW = 0.25;
+			public double NameW = 0.20;
 			public double ArgsW = 0.40;
 			public double ReturnsW = 0.20;
-			public double ParentW = 0.20;
+			public double ParentW = 0.10;
+			public double NeighW = 0.10;
 
 			public int NameScale = 8;
 			public int TypeScale = 16;
@@ -99,21 +100,86 @@ namespace VPTree
 			return total / (double)(n * (wt + wn));
 		}
 
+		public static string NeighborSigKey(MethodAnchor m)
+		{
+			var sb = new StringBuilder(128);
+			sb.Append(m.ReturnTypeNorm).Append('|');
+			if (m.Args != null && m.Args.Count > 0)
+			{
+				var types = new List<string>(m.Args.Count);
+				for (int i = 0; i < m.Args.Count; i++) types.Add(m.Args[i].TypeNorm);
+				types.Sort(StringComparer.Ordinal);
+				for (int i = 0; i < types.Count; i++)
+				{
+					if (i > 0) sb.Append(',');
+					sb.Append(types[i]);
+				}
+			}
+			return sb.ToString();
+		}
+
+		// Взвешенная Jaccard-дистанция для мешков соседей (метрика)
+		public static double WeightedJaccard(IDictionary<string, double> A, IDictionary<string, double> B)
+		{
+			int ac = (A != null) ? A.Count : 0;
+			int bc = (B != null) ? B.Count : 0;
+			if (ac == 0 && bc == 0) return 0.0;
+
+			double minSum = 0.0, maxSum = 0.0;
+
+			if (ac < bc)
+			{
+				var keys = new HashSet<string>(B.Keys);
+				if (A != null) foreach (var kv in A)
+					{
+						double a = kv.Value, b;
+						if (B.TryGetValue(kv.Key, out b))
+						{
+							minSum += (a < b ? a : b);
+							maxSum += (a > b ? a : b);
+							keys.Remove(kv.Key);
+						}
+						else maxSum += a;
+					}
+				foreach (var k in keys) maxSum += B[k];
+			}
+			else
+			{
+				var keys = new HashSet<string>(A != null ? A.Keys : new string[0]);
+				if (B != null) foreach (var kv in B)
+					{
+						double b = kv.Value;
+						if (A != null && A.TryGetValue(kv.Key, out double a))
+						{
+							minSum += (a < b ? a : b);
+							maxSum += (a > b ? a : b);
+							keys.Remove(kv.Key);
+						}
+						else maxSum += b;
+					}
+				foreach (var k in keys) maxSum += A[k];
+			}
+			if (maxSum <= 0) return 0.0;
+			return 1.0 - (minSum / maxSum);
+		}
+
 		public static double AnchorDistance(MethodAnchor a, MethodAnchor b, Weights w)
 		{
-			double dName = 0, dArgs = 0, dRet = 0, dRecv = 0;
+			double dName = 0, dArgs = 0, dRet = 0, dRecv = 0, dNeigh = 0;
 
 			Parallel.Invoke(
 			    () => dName = LevScaled(a?.MethodNameNorm ?? "", b?.MethodNameNorm ?? "", w.NameScale),
 			    () => dArgs = ArgsDistance(a?.Args, b?.Args, w),
 			    () => dRet = LevScaled(a?.ReturnTypeNorm ?? "", b?.ReturnTypeNorm ?? "", w.ReturnsScale),
-			    () => dRecv = LevScaled(a?.ParentNameNorm ?? "", b?.ParentNameNorm ?? "", w.ReceiverScale)
+			    () => dRecv = LevScaled(a?.ParentNameNorm ?? "", b?.ParentNameNorm ?? "", w.ReceiverScale),
+			    () => dNeigh = WeightedJaccard(a?.NeighborBag, b?.NeighborBag)
 			);
 
 			return w.NameW * dName
 			     + w.ArgsW * dArgs
 			     + w.ReturnsW * dRet
-			     + w.ParentW * dRecv;
+			     + w.ParentW * dRecv
+			     + w.NeighW * dNeigh;
 		}
 	}
 }

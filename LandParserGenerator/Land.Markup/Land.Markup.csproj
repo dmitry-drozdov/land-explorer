@@ -307,6 +307,9 @@
     <Compile Include="ExactHashRebinder.cs" />
     <Compile Include="ExactHashRebinderTests.cs" />
     <Compile Include="MarkupGraphql.cs" />
+    <Compile Include="MarkupGraphqlTest.cs" />
+    <Compile Include="NeighborBagBuilder.cs" />
+    <Compile Include="NeighborBagBuilderTests.cs" />
     <Compile Include="RebindEngine.cs" />
     <Compile Include="RebindEngineTests.cs" />
     <Compile Include="Similarity.cs" />

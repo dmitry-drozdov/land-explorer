@@ -16,6 +16,8 @@ namespace VPTree
 		public string ParentNameNorm;   // parent type
 		public string ReturnTypeNorm;     // "T1,T2" if multi
 		public List<Arg> Args;
+		public int OrdinalInParent { get; set; }
+		public Dictionary<string, double> NeighborBag { get; set; }
 
 		public sealed class Arg
 		{
