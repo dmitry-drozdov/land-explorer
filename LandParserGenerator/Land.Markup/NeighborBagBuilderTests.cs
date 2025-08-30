@@ -18,7 +18,7 @@ namespace Land.Markup
 		private static Tuple<string, string> Arg(string type, string name) => Tuple.Create(type, name);
 
 		private static MethodAnchor A(string id, string name, Tuple<string, string>[] args, string[] rets, string parent)
-		    => MethodAnchor.FromRaw(id, name, args ?? new Tuple<string, string>[0], rets ?? new string[0], parent);
+		    => MethodAnchor.FromRaw(id, 0, 100, name, args ?? new Tuple<string, string>[0], rets ?? new string[0], parent);
 
 		private static void AssertBagsAreEqual(
 		    IDictionary<string, double> actual,

@@ -12,6 +12,8 @@ namespace VPTree
 	public sealed class MethodAnchor
 	{
 		public string Id;
+		public int StartOffset;
+		public int EndOffset;
 		public string MethodNameNorm;
 		public string ParentNameNorm;   // parent type
 		public string ReturnTypeNorm;     // "T1,T2" if multi
@@ -27,6 +29,8 @@ namespace VPTree
 
 		public static MethodAnchor FromRaw(
 		    string id,
+		    int startOffset,
+		    int endOffset,
 		    string methodName,
 		    IEnumerable<Tuple<string, string>> args,   // (type, name)
 		    IEnumerable<string> returns,
@@ -36,6 +40,8 @@ namespace VPTree
 			var a = new MethodAnchor
 			{
 				Id = id ?? "",
+				StartOffset = startOffset,
+				EndOffset = endOffset,
 				MethodNameNorm = NormalizeName(methodName),
 				ParentNameNorm = NormalizeTypeName(parentName ?? ""),
 				ReturnTypeNorm = NormalizeReturnTypes(returns),

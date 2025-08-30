@@ -1,9 +1,12 @@
 ﻿using Land.Markup;
 using System;
+using System.Collections.Generic;
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using VPTree;
+
 
 namespace Land.Control
 {
@@ -54,13 +57,18 @@ namespace Land.Control
 					if (clickedItem != null && clickedItem.DataContext is ConcernPoint concernPoint)
 					{
 						/// При клике по точке переходим к ней
-						if (EnsureLocationValid(concernPoint))
+						/*if (EnsureLocationValid(concernPoint))
 						{
 							Editor.SetActiveDocumentAndOffset(
 								concernPoint.Context.FileName,
 								concernPoint.Location.Start
 							);
-						}
+						}*/
+
+
+						var anchor = markupGqlNew.anchorByConcernId[concernPoint.Id];
+
+						var res = markupGqlOld.RebindToOld(new List<MethodAnchor> { anchor });
 
 						clickedItem.InvalidateVisual();
 

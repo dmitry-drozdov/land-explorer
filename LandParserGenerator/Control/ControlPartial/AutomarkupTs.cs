@@ -32,8 +32,9 @@ namespace Land.Control
 {
 	public partial class LandExplorerControl : UserControl, INotifyPropertyChanged
 	{
-		MarkupGraphql markupGql1 = new MarkupGraphql();
-		MarkupGraphql markupGql2 = new MarkupGraphql();
+		MarkupGraphql markupGqlOld = new MarkupGraphql();
+		MarkupGraphql markupGqlNew = new MarkupGraphql();
+
 		int iter = 0;
 		void FillTs()
 		{
@@ -58,15 +59,15 @@ namespace Land.Control
 			MarkupGraphql markupGql = null;
 			if (iter == 0)
 			{
-				markupGql = markupGql1;
+				markupGql = markupGqlOld;
 			}
 			if (iter == 1)
 			{
-				markupGql = markupGql2;
+				markupGql = markupGqlNew;
 			}
 			if (iter == 2)
 			{
-				var matches = markupGql1.RebindToOld(markupGql2.anchors, k: 3, tau: 0.20, margin: 0.02);
+				var matches = markupGqlOld.RebindToOld(markupGqlNew.anchors, k: 3, tau: 0.20, margin: 0.02);
 				foreach (var m in matches)
 				{
 					if (m.Status == MatchStatus.Accepted)
@@ -91,8 +92,8 @@ namespace Land.Control
 
 			if (iter == 3)
 			{
-				markupGql1 = new MarkupGraphql();
-				markupGql2 = new MarkupGraphql();
+				markupGqlOld = new MarkupGraphql();
+				markupGqlNew = new MarkupGraphql();
 				iter = 0;
 				return;
 			}

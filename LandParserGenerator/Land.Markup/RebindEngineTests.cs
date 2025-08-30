@@ -25,45 +25,45 @@ namespace Land.Markup
 
 			// Старые якоря (эталон)
 			_old.Add(MethodAnchor.FromRaw(
-			    "old#1", "ComputeHash",
+			    "old#1", 0, 100, "ComputeHash",
 			    new[] { Tuple.Create("int", "a"), Tuple.Create("string", "b") },
 			    new[] { "int" },
 			    "Hasher"));
 
 			_old.Add(MethodAnchor.FromRaw(
-			    "old#2", "FindUser",
+			    "old#2", 0, 100, "FindUser",
 			    new[] { Tuple.Create("int", "id") },
 			    new[] { "*User", "error" },
 			    "Repo"));
 
 			_old.Add(MethodAnchor.FromRaw(
-			    "old#3", "WriteJSON",
+			    "old#3", 0, 100, "WriteJSON",
 			    new[] { Tuple.Create("io.Writer", "w"), Tuple.Create("any", "v"), Tuple.Create("bool", "indent") },
 			    new[] { "error" },
 			    "Encoder"));
 
 			// Дополнительно — пара для теста one-to-one конфликта
 			_old.Add(MethodAnchor.FromRaw(
-			    "old#A", "Sum",
+			    "old#A", 0, 100, "Sum",
 			    new[] { Tuple.Create("int", "a"), Tuple.Create("int", "b") },
 			    new[] { "int" },
 			    "MathSvc"));
 
 			_old.Add(MethodAnchor.FromRaw(           // очень близкий к old#A (разница только в имени)
-			    "old#B", "Sum2",
+			    "old#B", 0, 100, "Sum2",
 			    new[] { Tuple.Create("int", "a"), Tuple.Create("int", "b") },
 			    new[] { "int" },
 			    "MathSvc"));
 
 			// Двойники для неоднозначности (оба абсолютно одинаковые)
 			_old.Add(MethodAnchor.FromRaw(
-			    "old#D1", "Foo",
+			    "old#D1", 0, 100, "Foo",
 			    new[] { Tuple.Create("int", "x") },
 			    new[] { "int" },
 			    "Svc"));
 
 			_old.Add(MethodAnchor.FromRaw(
-			    "old#D2", "Foo",
+			    "old#D2", 0, 100, "Foo",
 			    new[] { Tuple.Create("int", "x") },
 			    new[] { "int" },
 			    "Svc"));
@@ -74,7 +74,7 @@ namespace Land.Markup
 
 		private static MethodAnchor NA(string id, string name, Tuple<string, string>[] args, string[] rets, string recv)
 		{
-			return MethodAnchor.FromRaw(id, name, args, rets, recv);
+			return MethodAnchor.FromRaw(id, 0, 100, name, args, rets, recv);
 		}
 
 		private static MatchResult FindByNewId(List<MatchResult> list, string newId)

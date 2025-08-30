@@ -15,7 +15,7 @@ namespace Land.Markup
 	public class MarkupGraphql
 	{
 		public List<MethodAnchor> anchors = new List<MethodAnchor>();
-		private Dictionary<Guid, MethodAnchor> _anchorByConcernId = new Dictionary<Guid, MethodAnchor>();
+		public Dictionary<Guid, MethodAnchor> anchorByConcernId = new Dictionary<Guid, MethodAnchor>();
 		private Rebinder _rebinder;
 		// счётчик порядков в пределах родителя (тип/класс)
 		private Dictionary<string, int> _ordByParent = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -35,7 +35,14 @@ namespace Land.Markup
 
 			var returnType = n.Children.Last().Children.First(y => y.ToString() != "LSB: [").ToString().Replace("id: ", "");
 
-			var anchor = MethodAnchor.FromRaw(n.Id.ToString(), name, args, new List<string> { returnType }, typeName);
+			var anchor = MethodAnchor.FromRaw(
+				n.Id.ToString(),
+				n.Location.Start.Offset,
+				n.Location.End.Offset,
+				name,
+				args,
+				new List<string> { returnType },
+				typeName);
 			// присвоим порядковый номер в пределах родителя
 			int ord;
 			if (!_ordByParent.TryGetValue(anchor.ParentNameNorm, out ord))
@@ -44,7 +51,7 @@ namespace Land.Markup
 			_ordByParent[anchor.ParentNameNorm] = ord;
 			anchor.OrdinalInParent = ord;
 			anchors.Add(anchor);
-			_anchorByConcernId[concernId] = anchor;
+			anchorByConcernId[concernId] = anchor;
 		}
 
 		public void CreateRebinder()

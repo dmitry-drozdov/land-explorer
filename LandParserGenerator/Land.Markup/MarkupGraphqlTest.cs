@@ -33,7 +33,7 @@ namespace Land.Markup
 		    string[] rets,
 		    string recv)
 		{
-			return MethodAnchor.FromRaw(id, name, args ?? new Tuple<string, string>[0], rets ?? new string[0], recv);
+			return MethodAnchor.FromRaw(id, 0, 100, name, args ?? new Tuple<string, string>[0], rets ?? new string[0], recv);
 		}
 
 		#region 6) Neighbors — учёт контекста соседей в kNN/VPTree

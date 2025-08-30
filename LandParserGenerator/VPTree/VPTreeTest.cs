@@ -23,15 +23,15 @@ namespace Tests
 				// Arrange
 				var anchors = new List<MethodAnchor>
 				{
-				    MethodAnchor.FromRaw("old#1", "ComputeHash",
+				    MethodAnchor.FromRaw("old#1",  0, 100,"ComputeHash",
 					new[] { Tuple.Create("int","a"), Tuple.Create("string","b") },
 					new[] { "int" }, "Hasher"),
 
-				    MethodAnchor.FromRaw("old#2", "FindUser",
+				    MethodAnchor.FromRaw("old#2", 0, 100, "FindUser",
 					new[] { Tuple.Create("int","id") },
 					new[] { "*User", "error" }, "Repo"),
 
-				    MethodAnchor.FromRaw("old#3", "WriteJSON",
+				    MethodAnchor.FromRaw("old#3", 0, 100, "WriteJSON",
 					new[] { Tuple.Create("io.Writer","w"), Tuple.Create("any","v"), Tuple.Create("bool","indent") },
 					new[] { "error" }, "Encoder"),
 				};
@@ -52,7 +52,7 @@ namespace Tests
 				var weights = new Dist.Weights();
 				var rebinder = new Rebinder(loaded, weights);
 
-				var q = MethodAnchor.FromRaw("new#tmp", "FindUser",
+				var q = MethodAnchor.FromRaw("new#tmp", 0, 100, "FindUser",
 				    new[] { Tuple.Create("int", "a"), Tuple.Create("string", "b") },
 				    new[] { "int" }, "Hasher");
 
@@ -118,7 +118,7 @@ namespace Tests
 		    string[] rets,
 		    string recv)
 		{
-			return MethodAnchor.FromRaw(id, name, args ?? new Tuple<string, string>[0], rets ?? new string[0], recv);
+			return MethodAnchor.FromRaw(id, 0, 100, name, args ?? new Tuple<string, string>[0], rets ?? new string[0], recv);
 		}
 
 		#region 1) Имя — Levenshtein, изолировано NameW

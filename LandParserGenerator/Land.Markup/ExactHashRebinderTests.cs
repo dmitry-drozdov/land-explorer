@@ -15,7 +15,7 @@ namespace Land.Markup
 		private static MethodAnchor NA(string id, string name,
 		    Tuple<string, string>[] args, string[] rets, string recv)
 		{
-			return MethodAnchor.FromRaw(id, name, args, rets, recv);
+			return MethodAnchor.FromRaw(id, 0, 100, name, args, rets, recv);
 		}
 
 		[TestMethod]
