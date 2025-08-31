@@ -42,6 +42,8 @@ namespace VPTree
 			var weights = new Dist.Weights();
 			var rebinder = new Rebinder(loaded, weights, null);
 
+			rebinder.ShapShot();
+
 			var q = MethodAnchor.FromRaw("new#tmp", 0, 100, "FindUser",
 			    new[] { Tuple.Create("int", "a"), Tuple.Create("string", "b") },
 			    new[] { "int" }, "Hasher");

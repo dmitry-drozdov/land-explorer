@@ -70,6 +70,8 @@ namespace LandServer
 			    ? p.projectPath
 			    : null;
 
+			Console.Error.WriteLine($"[init] protocolVersion={p.protocolVersion} projectPath={_projectPath ?? "<null>"}");
+
 			return Task.FromResult(new InitializeResult
 			{
 				serverVersion = "1.0.0",

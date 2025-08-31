@@ -29,5 +29,11 @@ namespace VPTree
 		{
 			return _tree.KNearest(query, k);
 		}
+
+		public void ShapShot()
+		{
+			var snap = _tree.ToSnapshot(a => a.Id, notes: "neighbors:window=3,decay=1/(1+d)");
+			VpTreeStorage.SaveJson("vp_index.json", snap);
+		}
 	}
 }

@@ -66,6 +66,9 @@
   <ItemGroup>
     <Compile Include="AnchorKeys.cs" />
     <Compile Include="AnchorsIO.cs" />
+    <Compile Include="VPTreeSnapshot.cs" />
+    <Compile Include="VpTreeSnapshotTests.cs" />
+    <Compile Include="VPTreeStorage.cs" />
     <Compile Include="VPTreeTest.cs" />
     <Compile Include="Dist.cs" />
     <Compile Include="Hungarian.cs" />

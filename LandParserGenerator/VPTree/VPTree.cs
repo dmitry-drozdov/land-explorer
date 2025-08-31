@@ -14,7 +14,7 @@ namespace VPTree
 	// =======================
 	// VP-Tree (exact kNN)
 	// =======================
-	public sealed class VPTree<T>
+	public sealed partial class VPTree<T>
 	{
 		private sealed class Node
 		{

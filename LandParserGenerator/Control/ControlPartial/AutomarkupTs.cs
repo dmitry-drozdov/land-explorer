@@ -101,9 +101,7 @@ namespace Land.Control
 			foreach (var file in gqlFiles)
 			{
 				Debug($"parsing gql {file}");
-				d.Start("parseGQL");
 				var pFile = LogFunction(() => GetParsed(file), true, false);
-				d.Stop("parseGQL");
 				Debug($"parsed gql {file}");
 
 				if (pFile == null)
