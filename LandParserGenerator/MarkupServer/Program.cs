@@ -1,7 +1,10 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
+using Land.Core.Specification;
+using Land.Core;
 using StreamJsonRpc;
 
 namespace LandServer
@@ -12,6 +15,36 @@ namespace LandServer
 	{
 		private static async Task Main(string[] args)
 		{
+			var messages = new List<Message>();
+
+			var parser = Builder.BuildParser(
+			    GrammarType.LR,
+			    File.ReadAllText("graphq.land"),
+			    messages
+			);
+
+			if (messages.Any(m => m.Type == MessageType.Error))
+			{
+				var error = messages.First(m => m.Type == MessageType.Error);
+
+				Console.Error.WriteLine($"Cannot generate parser {error.Text}");
+				Environment.Exit(1);
+			}
+			else
+			{
+				Console.Error.WriteLine("Parser Generated");
+			}
+
+			var node = parser.Parse("""
+				type DateInternal @shareable {
+				    duration: Int! @inaccessible
+				    unit: DurationUnit!
+				}
+				""").Item1;
+
+			Console.Error.WriteLine($"{node.Children[0]} {node.Children[0].Children[0]}");
+
+
 			using (var input = Console.OpenStandardInput())
 			using (var output = Console.OpenStandardOutput())
 			{
@@ -43,6 +76,7 @@ namespace LandServer
 		public int protocolVersion { get; set; }
 		public string projectPath { get; set; }  
 		public string offsetEncoding { get; set; }
+		public string graphqlParserPath { get; set; }
 	}
 	public class InitializeResult
 	{
@@ -71,6 +105,35 @@ namespace LandServer
 			    : null;
 
 			Console.Error.WriteLine($"[init] protocolVersion={p.protocolVersion} projectPath={_projectPath ?? "<null>"}");
+
+			var messages = new List<Message>();
+
+			var parser = Builder.BuildParser(
+			    GrammarType.LR,
+			    File.ReadAllText(p.graphqlParserPath),
+			    messages
+			);
+
+			if (messages.Any(m => m.Type == MessageType.Error))
+			{
+				var error = messages.First(m => m.Type == MessageType.Error);
+
+				Console.Error.WriteLine($"Cannot generate parser {error.Text}");
+				Environment.Exit(1);
+			}
+			else
+			{
+				Console.Error.WriteLine("Parser Generated");
+			}
+
+			var node = parser.Parse("""
+				type DateInternal @shareable {
+				    duration: Int! @inaccessible
+				    unit: DurationUnit!
+				}
+				""").Item1;
+
+			Console.Error.WriteLine($"{node.Children[0]} {node.Children[0].Children[0]}");
 
 			return Task.FromResult(new InitializeResult
 			{
