@@ -19,7 +19,7 @@ namespace LandServer
 
 			var parser = Builder.BuildParser(
 			    GrammarType.LR,
-			    File.ReadAllText("graphq.land"),
+			    File.ReadAllText("graphql.land"),
 			    messages
 			);
 
