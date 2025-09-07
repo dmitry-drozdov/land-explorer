@@ -138,48 +138,61 @@ namespace LandServer
 		[JsonRpcMethod("land/initialize", UseSingleObjectParameterDeserialization = true)]
 		public Task<InitializeResult> InitializeAsync(InitializeParams p)
 		{
-			// читаем и запоминаем путь проекта
-			var _projectPath = (!string.IsNullOrWhiteSpace(p.projectPath) && Directory.Exists(p.projectPath))
-			    ? p.projectPath
-			    : null;
-
-			Console.Error.WriteLine($"[init] protocolVersion={p.protocolVersion} projectPath={_projectPath ?? "<null>"} p.graphqlParserPath={p.graphqlParserPath}");
-
-			var messages = new List<Message>();
-
-			var parser = Builder.BuildParser(
-			    GrammarType.LR,
-			    File.ReadAllText(p.graphqlParserPath),
-			    messages
-			);
-
-			if (messages.Any(m => m.Type == MessageType.Error))
+			try
 			{
-				var error = messages.First(m => m.Type == MessageType.Error);
+				// читаем и запоминаем путь проекта
+				var _projectPath = (!string.IsNullOrWhiteSpace(p.projectPath) && Directory.Exists(p.projectPath))
+				    ? p.projectPath
+				    : null;
 
-				Console.Error.WriteLine($"Cannot generate parser {error.Text}");
-				Environment.Exit(1);
-			}
-			else
-			{
-				Console.Error.WriteLine("Parser Generated");
-			}
+				Console.Error.WriteLine($"[init] protocolVersion={p.protocolVersion} projectPath={_projectPath ?? "<null>"} p.graphqlParserPath={p.graphqlParserPath}");
 
-			var node = parser.Parse("""
+				var messages = new List<Message>();
+
+				var parser = Builder.BuildParser(
+				    GrammarType.LR,
+				    File.ReadAllText(p.graphqlParserPath),
+				    messages
+				);
+
+				if (messages.Any(m => m.Type == MessageType.Error))
+				{
+					var error = messages.First(m => m.Type == MessageType.Error);
+
+					Console.Error.WriteLine($"Cannot generate parser {error.Text}");
+					Environment.Exit(1);
+				}
+				else
+				{
+					Console.Error.WriteLine("Parser Generated");
+				}
+
+				var node = parser.Parse("""
 				type DateInternal @shareable {
 				    duration: Int! @inaccessible
 				    unit: DurationUnit!
 				}
 				""").Item1;
 
-			Console.Error.WriteLine($"{node.Children[0]} {node.Children[0].Children[0]}");
+				Console.Error.WriteLine($"{node.Children[0]} {node.Children[0].Children[0]}");
 
-			return Task.FromResult(new InitializeResult
+				return Task.FromResult(new InitializeResult
+				{
+					serverVersion = "1.0.0",
+					protocolVersion = 1,
+					capabilities = new Capabilities { pushUpdates = false }
+				});
+			}
+			catch (Exception ex)
 			{
-				serverVersion = "1.0.0",
-				protocolVersion = 1,
-				capabilities = new Capabilities { pushUpdates = false }
-			});
+				try { Console.Error.WriteLine("[fatal] " + ex); } catch { }
+				return Task.FromResult(new InitializeResult
+				{
+					serverVersion = "1.0.0",
+					protocolVersion = 1,
+					capabilities = new Capabilities { pushUpdates = false }
+				});
+			}
 		}
 
 
