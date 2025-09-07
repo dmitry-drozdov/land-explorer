@@ -6,6 +6,8 @@ using System.Threading.Tasks;
 using Land.Core.Specification;
 using Land.Core;
 using StreamJsonRpc;
+using System.Net.Sockets;
+using System.Net;
 
 namespace LandServer
 {
@@ -13,45 +15,82 @@ namespace LandServer
 	// ВАЖНО: ничего не писать в Console.WriteLine — это stdout/протокол!
 	internal static class Program
 	{
-		private static async Task Main(string[] args)
+		private static async Task<int> Main(string[] args)
 		{
-			var messages = new List<Message>();
-
-			var parser = Builder.BuildParser(
-			    GrammarType.LR,
-			    File.ReadAllText("graphql.land"),
-			    messages
-			);
-
-			if (messages.Any(m => m.Type == MessageType.Error))
+			try
 			{
-				var error = messages.First(m => m.Type == MessageType.Error);
+				var messages = new List<Message>();
 
-				Console.Error.WriteLine($"Cannot generate parser {error.Text}");
-				Environment.Exit(1);
-			}
-			else
-			{
-				Console.Error.WriteLine("Parser Generated");
-			}
+				var parser = Builder.BuildParser(
+				    GrammarType.LR,
+				    File.ReadAllText("graphql.land"),
+				    messages
+				);
 
-			var node = parser.Parse("""
+				if (messages.Any(m => m.Type == MessageType.Error))
+				{
+					var error = messages.First(m => m.Type == MessageType.Error);
+
+					Console.Error.WriteLine($"Cannot generate parser {error.Text}");
+					Environment.Exit(1);
+				}
+				else
+				{
+					Console.Error.WriteLine("Parser Generated");
+				}
+
+				var node = parser.Parse("""
 				type DateInternal @shareable {
 				    duration: Int! @inaccessible
 				    unit: DurationUnit!
 				}
 				""").Item1;
 
-			Console.Error.WriteLine($"{node.Children[0]} {node.Children[0].Children[0]}");
+				Console.Error.WriteLine($"{node.Children[0]} {node.Children[0].Children[0]}");
 
+				if (args.Length >= 2 && args[0] == "--tcp" || true)
+				{
+					var ep = ParseEndPoint("127.0.0.1:7711"); // args[1]
+					Console.Error.WriteLine($"[boot] TCP mode on {ep}");
 
-			using (var input = Console.OpenStandardInput())
-			using (var output = Console.OpenStandardOutput())
-			{
-				var service = new LandService();
-				var rpc = JsonRpc.Attach(output, input, service);
-				await rpc.Completion; // держим процесс, пока клиент не закроет канал
+					var listener = new TcpListener(ep);
+					listener.Start();
+
+					using var client = await listener.AcceptTcpClientAsync(); // один клиент на сессию
+					using var stream = client.GetStream();
+					var svc = new LandService();
+					var rpc = JsonRpc.Attach(stream, stream, svc); // HeaderDelimitedMessageHandler по-умолчанию
+					Console.Error.WriteLine("[boot] client connected");
+					await rpc.Completion;
+					Console.Error.WriteLine("[boot] rpc completion");
+					return 0;
+				}
+				else
+				{
+					Console.Error.WriteLine("[boot] stdio mode");
+					using var input = Console.OpenStandardInput();
+					using var output = Console.OpenStandardOutput();
+					var svc = new LandService();
+					var rpc = JsonRpc.Attach(output, input, svc);
+					await rpc.Completion;
+					Console.Error.WriteLine("[boot] rpc completion");
+					return 0;
+				}
 			}
+			catch (Exception ex)
+			{
+				try { Console.Error.WriteLine("[fatal] " + ex); } catch { }
+				return 1;
+			}
+		}
+
+		private static IPEndPoint ParseEndPoint(string s)
+		{
+			var parts = s.Split(':');
+			var host = parts[0];
+			var port = int.Parse(parts[1]);
+			var ip = host == "localhost" ? IPAddress.Loopback : IPAddress.Parse(host);
+			return new IPEndPoint(ip, port);
 		}
 	}
 
@@ -74,7 +113,7 @@ namespace LandServer
 	public class InitializeParams
 	{
 		public int protocolVersion { get; set; }
-		public string projectPath { get; set; }  
+		public string projectPath { get; set; }
 		public string offsetEncoding { get; set; }
 		public string graphqlParserPath { get; set; }
 	}
@@ -104,7 +143,7 @@ namespace LandServer
 			    ? p.projectPath
 			    : null;
 
-			Console.Error.WriteLine($"[init] protocolVersion={p.protocolVersion} projectPath={_projectPath ?? "<null>"}");
+			Console.Error.WriteLine($"[init] protocolVersion={p.protocolVersion} projectPath={_projectPath ?? "<null>"} p.graphqlParserPath={p.graphqlParserPath}");
 
 			var messages = new List<Message>();
 
