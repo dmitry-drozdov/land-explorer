@@ -103,6 +103,7 @@ namespace LandServer
 	public class Anchor
 	{
 		public string Id;
+		public string Filepath;
 		public int StartOffset;
 		public int EndOffset;
 		public string MethodNameNorm;
@@ -116,7 +117,6 @@ namespace LandServer
 	public class InitializeParams
 	{
 		public int protocolVersion { get; set; }
-		public string projectPath { get; set; }
 		public string offsetEncoding { get; set; }
 		public string graphqlParserPath { get; set; }
 	}
@@ -130,10 +130,10 @@ namespace LandServer
 
 	public class ListAnchorsParams
 	{
-		public string filePath { get; set; }
+		public string folderPath { get; set; }
 	}
 
-	public class ListAnchorsResult { public string filePath; public List<Anchor> anchors; }
+	public class ListAnchorsResult { public string folderPath; public List<Anchor> anchors; }
 
 	// ====== RPC ======
 	public class LandService
@@ -144,12 +144,7 @@ namespace LandServer
 		{
 			try
 			{
-				// читаем и запоминаем путь проекта
-				var _projectPath = (!string.IsNullOrWhiteSpace(p.projectPath) && Directory.Exists(p.projectPath))
-				    ? p.projectPath
-				    : null;
-
-				Console.Error.WriteLine($"[init] protocolVersion={p.protocolVersion} projectPath={_projectPath ?? "<null>"} p.graphqlParserPath={p.graphqlParserPath}");
+				Console.Error.WriteLine($"[init] protocolVersion={p.protocolVersion} p.graphqlParserPath={p.graphqlParserPath}");
 
 				var messages = new List<Message>();
 
@@ -195,32 +190,31 @@ namespace LandServer
 		[JsonRpcMethod("land/listAnchors", UseSingleObjectParameterDeserialization = true)]
 		public Task<ListAnchorsResult> ListAnchorsAsync(ListAnchorsParams p)
 		{
-			if (p == null || string.IsNullOrWhiteSpace(p.filePath))
+			if (p == null || string.IsNullOrWhiteSpace(p.folderPath))
 				throw new ArgumentException("filePath is required");
-			return ListAnchorsCoreAsync(p.filePath);
+			return ListAnchorsCoreAsync(p.folderPath, "graphql");
 		}
 
-		private Task<ListAnchorsResult> ListAnchorsCoreAsync(string filePath)
+		private Task<ListAnchorsResult> ListAnchorsCoreAsync(string folderPath, string extension)
 		{
 			var anchors = new List<Anchor>();
-			//var gqlFiles = GetAllFiles(filePath);
-			/*foreach (var gqlFile in gqlFiles)
-			{*/
-			var txt = File.ReadAllText(filePath);
-			var root = parser.Parse(txt).Item1;
-
-			var funcs = GetFuncs(root);
-			foreach (var func in funcs)
+			var gqlFiles = GetAllFiles(folderPath, extension);
+			foreach (var gqlFile in gqlFiles)
 			{
-				anchors.Add(GetAnchorFromNode(func));
+				var txt = File.ReadAllText(gqlFile);
+				var root = parser.Parse(txt).Item1;
+
+				var funcs = GetFuncs(root);
+				foreach (var func in funcs)
+				{
+					anchors.Add(GetAnchorFromNode(func, gqlFile));
+				}
 			}
 
-			//}
-
-			return Task.FromResult(new ListAnchorsResult { filePath = filePath, anchors = anchors });
+			return Task.FromResult(new ListAnchorsResult { folderPath = folderPath, anchors = anchors });
 		}
 
-		private Anchor GetAnchorFromNode(Node n)
+		private Anchor GetAnchorFromNode(Node n, string filepath)
 		{
 			var typeName = n.Parent.Children[1].ToString().Replace("id: ", "");
 			var name = n.Children.First().ToString().Replace("id: ", "");
@@ -245,6 +239,7 @@ namespace LandServer
 			return new Anchor
 			{
 				Id = anchor.Id,
+				Filepath = filepath,
 				StartOffset = n.Location.Start.Offset,
 				EndOffset = n.Location.End.Offset,
 				MethodNameNorm = anchor.MethodNameNorm,
@@ -280,9 +275,9 @@ namespace LandServer
 			return res;
 		}
 
-		private IEnumerable<string> GetAllFiles(string ext)
+		private IEnumerable<string> GetAllFiles(string folder, string ext)
 		{
-			return Directory.EnumerateFiles(@"e:\phd\ts\test\2\", $"*.{ext}", SearchOption.AllDirectories).
+			return Directory.EnumerateFiles(folder, $"*.{ext}", SearchOption.AllDirectories).
 				Where(x => !x.Contains(@"\vendor\"));
 		}
 
