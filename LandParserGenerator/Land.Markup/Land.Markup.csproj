@@ -336,9 +336,9 @@
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\VPTree\VPTree.csproj">
-      <Project>{9549263e-be08-41f4-b72f-12f066cc7fef}</Project>
-      <Name>VPTree</Name>
+    <ProjectReference Include="..\VPTreeLib\VPTreeLib.csproj">
+      <Project>{ec3e0acf-832e-44e1-bb1f-19d6fe116102}</Project>
+      <Name>VPTreeLib</Name>
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
