@@ -12,7 +12,7 @@ using Land.Core.Parsing;
 using Land.Core.Parsing.Tree;
 using VPTree;
 
-namespace LandServer
+namespace MarkupServer
 {
 	// Консольное приложение .NET Framework 4.6.1
 	// ВАЖНО: ничего не писать в Console.WriteLine — это stdout/протокол!
@@ -187,7 +187,7 @@ namespace LandServer
 
 
 
-		[JsonRpcMethod("land/listAnchors", UseSingleObjectParameterDeserialization = true)]
+		/*[JsonRpcMethod("land/listAnchors", UseSingleObjectParameterDeserialization = true)]
 		public Task<ListAnchorsResult> ListAnchorsAsync(ListAnchorsParams p)
 		{
 			if (p == null || string.IsNullOrWhiteSpace(p.folderPath))
@@ -212,9 +212,48 @@ namespace LandServer
 			}
 
 			return Task.FromResult(new ListAnchorsResult { folderPath = folderPath, anchors = anchors });
+		}*/
+
+		[JsonRpcMethod("land/listAnchors", UseSingleObjectParameterDeserialization = true)]
+		public Task<ListTreeResult> ListAnchorsAsync(ListTreeParams p)
+		{
+			var roots = new List<TreeNode> { };
+
+			var gqlFiles = GetAllFiles(p.folderPath, "graphql");
+			foreach (var gqlFile in gqlFiles)
+			{
+				var txt = File.ReadAllText(gqlFile);
+				var root = parser.Parse(txt).Item1;
+
+				var funcs = GetFuncs(root);
+				foreach (var funcsPerType in funcs)
+				{
+					var group = new TreeNode
+					{
+						Name = funcsPerType.Key,
+						NodeType = "group",
+					};
+					foreach (var func in funcsPerType.Value)
+					{
+						var node = GetAnchorFromNode(func, gqlFile);
+						var subgroup = new TreeNode
+						{
+							Name = node.Name,
+							NodeType = "group",
+						};
+						node.Name = "graphql";
+						subgroup.Children.Add(node);
+						group.Children.Add(subgroup);
+					}
+
+					roots.Add(group);
+				}
+			}
+
+			return Task.FromResult(new ListTreeResult { Roots = roots });
 		}
 
-		private Anchor GetAnchorFromNode(Node n, string filepath)
+		private TreeNode GetAnchorFromNode(Node n, string filepath)
 		{
 			var typeName = n.Parent.Children[1].ToString().Replace("id: ", "");
 			var name = n.Children.First().ToString().Replace("id: ", "");
@@ -236,9 +275,11 @@ namespace LandServer
 				args,
 				new List<string> { returnType },
 				typeName);
-			return new Anchor
+			return new TreeNode
 			{
 				Id = anchor.Id,
+				Name = name,
+				NodeType = "anchor",
 				Filepath = filepath,
 				StartOffset = n.Location.Start.Offset,
 				EndOffset = n.Location.End.Offset,
@@ -249,9 +290,9 @@ namespace LandServer
 			};
 		}
 
-		private List<Node> GetFuncs(Node root)
+		private Dictionary<string, List<Node>> GetFuncs(Node root)
 		{
-			var res = new List<Node>();
+			var res = new Dictionary<string, List<Node>>();
 			if (root == null)
 			{
 				return res;
@@ -263,11 +304,16 @@ namespace LandServer
 				{
 					continue;
 				}
+
+				var key = child.Children[1].ToString().Replace("id: ", "");
 				foreach (var def in child.Children)
 				{
 					if (def.ToString() == "func_line")
 					{
-						res.Add(def);
+						if (!res.ContainsKey(key))
+							res.Add(key, new List<Node>());
+
+						res[key].Add(def);
 					}
 				}
 			}
