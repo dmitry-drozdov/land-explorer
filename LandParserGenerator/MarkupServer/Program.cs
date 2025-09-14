@@ -8,6 +8,9 @@ using Land.Core;
 using StreamJsonRpc;
 using System.Net.Sockets;
 using System.Net;
+using Land.Core.Parsing;
+using Land.Core.Parsing.Tree;
+using VPTree;
 
 namespace LandServer
 {
@@ -135,6 +138,7 @@ namespace LandServer
 	// ====== RPC ======
 	public class LandService
 	{
+		private BaseParser parser;
 		[JsonRpcMethod("land/initialize", UseSingleObjectParameterDeserialization = true)]
 		public Task<InitializeResult> InitializeAsync(InitializeParams p)
 		{
@@ -149,7 +153,7 @@ namespace LandServer
 
 				var messages = new List<Message>();
 
-				var parser = Builder.BuildParser(
+				parser = Builder.BuildParser(
 				    GrammarType.LR,
 				    File.ReadAllText(p.graphqlParserPath),
 				    messages
@@ -166,15 +170,6 @@ namespace LandServer
 				{
 					Console.Error.WriteLine("Parser Generated");
 				}
-
-				var node = parser.Parse("""
-				type DateInternal @shareable {
-				    duration: Int! @inaccessible
-				    unit: DurationUnit!
-				}
-				""").Item1;
-
-				Console.Error.WriteLine($"{node.Children[0]} {node.Children[0].Children[0]}");
 
 				return Task.FromResult(new InitializeResult
 				{
@@ -207,14 +202,88 @@ namespace LandServer
 
 		private Task<ListAnchorsResult> ListAnchorsCoreAsync(string filePath)
 		{
-			var anchors = new List<Anchor> {
-				new Anchor {
-				    Id="a1", StartOffset=0, EndOffset=0,
-				    MethodNameNorm="Foo", ParentNameNorm="Bar", ReturnTypeNorm="void",
-				    Args = new List<Arg>{ new Arg{ TypeNorm="int", NameNorm="x"} }
-				}
-			    };
+			var anchors = new List<Anchor>();
+			//var gqlFiles = GetAllFiles(filePath);
+			/*foreach (var gqlFile in gqlFiles)
+			{*/
+			var txt = File.ReadAllText(filePath);
+			var root = parser.Parse(txt).Item1;
+
+			var funcs = GetFuncs(root);
+			foreach (var func in funcs)
+			{
+				anchors.Add(GetAnchorFromNode(func));
+			}
+
+			//}
+
 			return Task.FromResult(new ListAnchorsResult { filePath = filePath, anchors = anchors });
+		}
+
+		private Anchor GetAnchorFromNode(Node n)
+		{
+			var typeName = n.Parent.Children[1].ToString().Replace("id: ", "");
+			var name = n.Children.First().ToString().Replace("id: ", "");
+
+			var args = n.Children.Skip(1).
+				TakeWhile(x => x.Type == "func_arg").
+				Select(x => new Tuple<string, string>(
+					x.Children[0].Children[1].Children.First(y => y.ToString() != "LSB: [").ToString().Replace("id: ", ""), // type
+					x.Children[0].Children[0].ToString().Replace("id: ", "") // name
+				));
+
+			var returnType = n.Children.Last().Children.First(y => y.ToString() != "LSB: [").ToString().Replace("id: ", "");
+
+			var anchor = MethodAnchor.FromRaw(
+				n.Id.ToString(),
+				n.Location.Start.Offset,
+				n.Location.End.Offset,
+				name,
+				args,
+				new List<string> { returnType },
+				typeName);
+			return new Anchor
+			{
+				Id = anchor.Id,
+				StartOffset = n.Location.Start.Offset,
+				EndOffset = n.Location.End.Offset,
+				MethodNameNorm = anchor.MethodNameNorm,
+				ParentNameNorm = anchor.ParentNameNorm,
+				ReturnTypeNorm = anchor.ReturnTypeNorm,
+				Args = anchor.Args.Select(x => new Arg { NameNorm = x.NameNorm, TypeNorm = x.TypeNorm }).ToList()
+			};
+		}
+
+		private List<Node> GetFuncs(Node root)
+		{
+			var res = new List<Node>();
+			if (root == null)
+			{
+				return res;
+			}
+
+			foreach (var child in root.Children)
+			{
+				if (child.ToString() != "type_def")
+				{
+					continue;
+				}
+				foreach (var def in child.Children)
+				{
+					if (def.ToString() == "func_line")
+					{
+						res.Add(def);
+					}
+				}
+			}
+
+			return res;
+		}
+
+		private IEnumerable<string> GetAllFiles(string ext)
+		{
+			return Directory.EnumerateFiles(@"e:\phd\ts\test\2\", $"*.{ext}", SearchOption.AllDirectories).
+				Where(x => !x.Contains(@"\vendor\"));
 		}
 
 

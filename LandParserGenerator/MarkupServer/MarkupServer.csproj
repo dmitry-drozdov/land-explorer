@@ -38,6 +38,9 @@
     <PackageReference Include="System.Threading.Tasks.Dataflow" Version="8.0.1" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\VPTreeLib\VPTreeLib.csproj" />
+  </ItemGroup>
+  <ItemGroup>
     <Reference Include="Land.Core8">
       <HintPath>lib\Land.Core8.dll</HintPath>
     </Reference>
