@@ -12,6 +12,7 @@ using Land.Core.Parsing;
 using Land.Core.Parsing.Tree;
 using VPTree;
 
+
 namespace MarkupServer
 {
 	// Консольное приложение .NET Framework 4.6.1
@@ -119,6 +120,7 @@ namespace MarkupServer
 		public int protocolVersion { get; set; }
 		public string offsetEncoding { get; set; }
 		public string graphqlParserPath { get; set; }
+		public string typescriptParserPath { get; set; }
 	}
 	public class InitializeResult
 	{
@@ -138,33 +140,45 @@ namespace MarkupServer
 	// ====== RPC ======
 	public class LandService
 	{
-		private BaseParser parser;
+		private BaseParser graphqlParser;
+		private BaseParser typescriptParser;
 		[JsonRpcMethod("land/initialize", UseSingleObjectParameterDeserialization = true)]
 		public Task<InitializeResult> InitializeAsync(InitializeParams p)
 		{
 			try
 			{
-				Console.Error.WriteLine($"[init] protocolVersion={p.protocolVersion} p.graphqlParserPath={p.graphqlParserPath}");
+				Debug($"[init] protocolVersion={p.protocolVersion} p.graphqlParserPath={p.graphqlParserPath}, p.typescriptPath={p.typescriptParserPath}");
 
 				var messages = new List<Message>();
-
-				parser = Builder.BuildParser(
+				graphqlParser = Builder.BuildParser(
 				    GrammarType.LR,
 				    File.ReadAllText(p.graphqlParserPath),
 				    messages
 				);
-
 				if (messages.Any(m => m.Type == MessageType.Error))
 				{
 					var error = messages.First(m => m.Type == MessageType.Error);
-
-					Console.Error.WriteLine($"Cannot generate parser {error.Text}");
+					Debug($"Cannot generate parser {error.Text}");
 					Environment.Exit(1);
 				}
 				else
+					Debug("Parser GQL Generated");
+
+
+				messages = new List<Message>();
+				typescriptParser = Builder.BuildParser(
+				    GrammarType.LR,
+				    File.ReadAllText(p.typescriptParserPath),
+				    messages
+				);
+				if (messages.Any(m => m.Type == MessageType.Error))
 				{
-					Console.Error.WriteLine("Parser Generated");
+					var error = messages.First(m => m.Type == MessageType.Error);
+					Debug($"Cannot generate parser {error.Text}");
+					Environment.Exit(1);
 				}
+				else
+					Debug("Parser TS Generated");
 
 				return Task.FromResult(new InitializeResult
 				{
@@ -223,7 +237,7 @@ namespace MarkupServer
 			foreach (var gqlFile in gqlFiles)
 			{
 				var txt = File.ReadAllText(gqlFile);
-				var root = parser.Parse(txt).Item1;
+				var root = graphqlParser.Parse(txt).Item1;
 
 				var funcs = GetFuncs(root);
 				foreach (var funcsPerType in funcs)
@@ -235,14 +249,14 @@ namespace MarkupServer
 					};
 					foreach (var func in funcsPerType.Value)
 					{
-						var node = GetAnchorFromNode(func, gqlFile);
+						var anchor = GetAnchorFromGqlNode(func, gqlFile);
 						var subgroup = new TreeNode
 						{
-							Name = node.Name,
+							Name = anchor.Name,
 							NodeType = "group",
 						};
-						node.Name = "graphql";
-						subgroup.Children.Add(node);
+						anchor.Name = "graphql";
+						subgroup.Children.Add(anchor);
 						group.Children.Add(subgroup);
 					}
 
@@ -250,10 +264,49 @@ namespace MarkupServer
 				}
 			}
 
+			var tsFiles = GetAllFiles(p.folderPath, "ts");
+			foreach (var tsFile in tsFiles)
+			{
+				var txt = File.ReadAllText(tsFile);
+				var root = typescriptParser.Parse(txt).Item1;
+				var nodesPerClass = GetTsNodes(root);
+				foreach (var nodes in nodesPerClass)
+				{
+					foreach (var node in nodes.Value)
+					{
+						var anchor = GetAnchorFromTsNode(node, tsFile, nodes.Key);
+						roots.Add(anchor);
+					}
+				}
+			}
+
 			return Task.FromResult(new ListTreeResult { Roots = roots });
 		}
 
-		private TreeNode GetAnchorFromNode(Node n, string filepath)
+		private TreeNode GetAnchorFromTsNode(Node n, string filepath, string parentName)
+		{
+			var name = n.Children[0].ToString().Replace("ID: ", "").ToLower();
+			var args = n.Children[1].Children.Select(x => new Tuple<string, string>(
+				x.ToString().Replace("arg", ""),
+				"")).
+				Where(x => x.Item1 != "").ToList();
+
+			return new TreeNode
+			{
+				Id = n.Id.ToString(),
+				Name = name,
+				NodeType = "anchor",
+				Filepath = filepath,
+				StartOffset = n.Location.Start.Offset,
+				EndOffset = n.Location.End.Offset,
+				MethodNameNorm = NormalizeName(name),
+				ParentNameNorm = NormalizeName(parentName),
+				ReturnTypeNorm = NormalizeReturnTypes(new List<string> { "" }),
+				Args = NormalizeArgs(args),
+			};
+		}
+
+		private TreeNode GetAnchorFromGqlNode(Node n, string filepath)
 		{
 			var typeName = n.Parent.Children[1].ToString().Replace("id: ", "");
 			var name = n.Children.First().ToString().Replace("id: ", "");
@@ -267,27 +320,64 @@ namespace MarkupServer
 
 			var returnType = n.Children.Last().Children.First(y => y.ToString() != "LSB: [").ToString().Replace("id: ", "");
 
-			var anchor = MethodAnchor.FromRaw(
-				n.Id.ToString(),
-				n.Location.Start.Offset,
-				n.Location.End.Offset,
-				name,
-				args,
-				new List<string> { returnType },
-				typeName);
 			return new TreeNode
 			{
-				Id = anchor.Id,
+				Id = n.Id.ToString(),
 				Name = name,
 				NodeType = "anchor",
 				Filepath = filepath,
 				StartOffset = n.Location.Start.Offset,
 				EndOffset = n.Location.End.Offset,
-				MethodNameNorm = anchor.MethodNameNorm,
-				ParentNameNorm = anchor.ParentNameNorm,
-				ReturnTypeNorm = anchor.ReturnTypeNorm,
-				Args = anchor.Args.Select(x => new Arg { NameNorm = x.NameNorm, TypeNorm = x.TypeNorm }).ToList()
+				MethodNameNorm = NormalizeName(name),
+				ParentNameNorm = NormalizeName(typeName),
+				ReturnTypeNorm = NormalizeReturnTypes(new List<string> { returnType }),
+				Args = NormalizeArgs(args),
 			};
+		}
+
+		public static List<Arg> NormalizeArgs(IEnumerable<Tuple<string, string>> args)
+		{
+			var res = new List<Arg>();
+			foreach (var t in args)
+			{
+				var ar = new Arg
+				{
+					TypeNorm = NormalizeTypeName(t != null ? (t.Item1 ?? "") : ""),
+					NameNorm = NormalizeName(t != null ? (t.Item2 ?? "") : "")
+				};
+				res.Add(ar);
+			}
+			return res;
+		}
+
+		public static string NormalizeName(string s)
+		{
+			if (string.IsNullOrWhiteSpace(s)) return "";
+			// split camelCase/PascalCase
+			var withSpaces = System.Text.RegularExpressions.Regex.Replace(s, "([a-z0-9])([A-Z])", "$1 $2");
+			withSpaces = withSpaces.Replace('_', ' ');
+			var tokens = withSpaces.ToLowerInvariant().Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+			return string.Join(" ", tokens);
+		}
+
+		public static string NormalizeTypeName(string t)
+		{
+			if (string.IsNullOrWhiteSpace(t)) return "";
+			var s = t.Trim();
+			s = System.Text.RegularExpressions.Regex.Replace(s, @"\s+", " ");
+			s = s.Replace(" *", "*").Replace("* ", "*");
+			s = s.Replace(" [", "[").Replace("[ ", "[");
+			s = s.Replace(" ]", "]").Replace("] ", "]");
+			s = s.Replace(" ,", ",").Replace(", ", ",");
+			return s;
+		}
+
+		public static string NormalizeReturnTypes(IEnumerable<string> returns)
+		{
+			if (returns == null) return "";
+			var arr = returns.Select(NormalizeTypeName).ToArray();
+			if (arr.Length == 0) return "";
+			return string.Join(",", arr);
 		}
 
 		private Dictionary<string, List<Node>> GetFuncs(Node root)
@@ -319,6 +409,51 @@ namespace MarkupServer
 			}
 
 			return res;
+		}
+
+		private void Debug(string msg)
+		{
+			Console.Error.WriteLine(msg);
+		}
+
+		private Dictionary<string, List<Node>> GetTsNodes(Node root)
+		{
+			var res = new Dictionary<string, List<Node>>();
+			if (root == null)
+			{
+				return res;
+			}
+
+			foreach (var child in root.Children)
+			{
+				var nodeName = child.ToString();
+				if (nodeName == "struct" || nodeName == "class" || nodeName == "lamda_struct")
+				{
+					var className = child.Children[1].ToString();
+					var list = new List<Node>();
+					GetTsNodesHelp(child, list);
+
+					if (!res.ContainsKey(className))
+						res.Add(className, new List<Node>());
+
+					res[className].AddRange(list);
+				}
+			}
+			return res;
+		}
+
+		public void GetTsNodesHelp(Node root, List<Node> tsNodes)
+		{
+			var nodeName = root.ToString();
+			if (nodeName == "func" || nodeName == "sub_field_func_impl" || nodeName == "sub_field_any")
+			{
+				tsNodes.Add(root);
+				return;
+			}
+			foreach (var child in root.Children)
+			{
+				GetTsNodesHelp(child, tsNodes);
+			}
 		}
 
 		private IEnumerable<string> GetAllFiles(string folder, string ext)
