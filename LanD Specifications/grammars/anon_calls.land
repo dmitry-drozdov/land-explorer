@@ -1,0 +1,63 @@
+COMMENT		: COMMENT_L|COMMENT_ML
+COMMENT_L	: '//' ~[\n\r]*
+COMMENT_ML	: '/*' .*? '*/'
+
+ITALIC_QUOTE : '`' .*? '`'
+
+QUOTE		: '"'
+SPREAD 		: '...'
+
+// чтобы пропускать этот токен
+VAR: 'var'
+CONST: 'const'
+IF : 'if' 
+CASE: 'case'
+RETURN: 'return'
+
+// важно пропускать строки и символы, так как в них могут быть [{(, что нарушит парность скобок
+STRING		: STRING_STD
+STRING_STD	: '"' ('\\"'|'\\\\'|.)*? '"'
+
+CHAR		: '\'' ('\\\''|'\\\\'|.)*? '\''
+
+CURVE_BRACKETED : %left '{' %right '}'
+ROUND_BRACKETED : %left '(' %right ')'
+
+ID: [a-zA-Z_][a-zA-Z0-9_\u1684-\u1697]*
+
+
+content	= entity*
+
+entity = Any | anon_func_call  | '{' entity* '}' |  '(' entity* ')'
+
+
+anon_func_call = 'func' '(' Any ')'  (AnyAvoid('\n')|struct|interface)* '{' Any '}' '(' Any ')'
+			// ввели детализацию конструкций со скобками {}, которые мб в возвращаемом значении
+			// \n нужно для кейса когда есть строка var unpackWrapper func(f images.Handler) images.Handler
+			// func_variable нужно для кейса когда есть слайс функций
+
+
+struct = 'struct' '{' Any '}'
+interface = 'interface' '{' Any '}'
+
+%%
+
+%parsing {
+	recovery
+	fragment 
+	start content
+	skip COMMENT STRING CHAR
+}
+
+%nodes {
+	ghost entity 
+	leaf 
+	void
+}
+
+
+
+%markup {
+	land 
+	headercore(f_name) 
+}

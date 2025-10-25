@@ -1,0 +1,84 @@
+COMMENT		: COMMENT_L|COMMENT_ML
+COMMENT_L	: '//' ~[\n\r]*
+COMMENT_ML	: '/*' .*? '*/'
+
+ITALIC_QUOTE : '`' .*? '`'
+
+QUOTE		: '"'
+SPREAD 		: '...'
+
+// чтобы пропускать этот токен
+VAR: 'var'
+CONST: 'const'
+TYPE: 'type'
+IF : 'if' 
+FOR: 'for'
+SWITCH: 'switch'
+CASE: 'case'
+RETURN: 'return'
+NL: '\n'
+GO: 'go'
+RANGE: 'range'
+FUNC: 'func'
+
+BASE_TYPE: 'map' | 'chan' | 'bool' | 'string' | 'int' | 'int8' | 'int16' | 'int32' | 'int64' | 'uint' | 'uint8' | 'uint16' | 'uint32' | 'uint64' | 'uintptr' | 'byte' | 'rune' | 'float32' | 'float64' | 'complex64' | 'complex128'
+
+BASE_FUNC: 'close' | 'len' | 'cap' | 'copy' | 'delete' | 'complex' | 'real' | 'imag' | 'new' | 'make' | 'append' | 'panic' | 'recover' | 'print' | 'println'
+
+
+// важно пропускать строки и символы, так как в них могут быть [{(, что нарушит парность скобок
+STRING		: STRING_STD
+STRING_STD	: '"' ('\\"'|'\\\\'|.)*? '"'
+
+CHAR		: '\'' ('\\\''|'\\\\'|.)*? '\''
+
+CURVE_BRACKETED : %left '{' %right '}'
+ROUND_BRACKETED : %left '(' %right ')'
+SQUARE_BRACKETED : %left '[' %right ']'
+
+ID: [a-zA-Z_\u0192\u1684-\u1697\u0370-\u03FF][a-zA-Z0-9_\u0192\u1684-\u1697\u0370-\u03FF]*
+
+
+
+content	= entity*
+
+entity =  call | smth
+		 |  interface 
+		 | '(' entity* ')'
+		 | '[' entity* ']'
+		 | '{' entity* '}'
+		 | Any
+
+
+call = smth ('(' Any ')')+
+
+smth =  ID ('[' entity* ']')* ('.' smth2)?
+	
+smth2 =  smth
+	| '(' Any ')' ('[' entity* ']')* ('.' smth2)?
+
+
+interface = 'interface' '{' Any '}'
+
+
+%%
+
+%parsing {
+	recovery
+	fragment 
+	start content
+	skip COMMENT STRING CHAR
+}
+
+%nodes {
+	ghost entity 
+	leaf
+	void 
+}
+
+
+
+%markup {
+	land 
+	headercore(f_name) 
+}

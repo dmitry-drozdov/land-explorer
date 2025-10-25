@@ -1,0 +1,91 @@
+COMMENT		: COMMENT_L|COMMENT_ML
+COMMENT_L	: '//' ~[\n\r]*
+COMMENT_ML	: '/*' .*? '*/'
+
+ITALIC_QUOTE : '`' .*? '`'
+
+QUOTE		: '"'
+SPREAD 		: '...'
+
+STRING		: STRING_STD
+STRING_STD	: '"' ('\\"'|'\\\\'|.)*? '"'
+
+CHAR		: '\'' ('\\\''|'\\\\'|.)*? '\''
+CLASS_STRUCT_INTERFACE : 'struct'|'interface'
+ID			: '@'?[_a-zA-Z\u0430-\u044F\u0410-\u042F\u0192\u06F0\u03A9][_0-9a-zA-Z\u0430-\u044F\u0410-\u042F.\u0192\u06F0\u03A9\u1600-\u1700]*
+
+
+LB			: '('
+RB			: ')'
+ 
+CURVE_BRACKETED : %left '{' %right '}'
+ROUND_BRACKETED : %left '(' %right ')'
+SQUARE_BRACKETED : %left ('['|GENERAL_ATTRIBUTE_START) %right ']'
+
+
+NL			: '\n'
+
+ 
+package_content	=	entity*
+package			=	'package' package_name  import*  package_content
+
+import = 'import' AnyInclude(QUOTE) | import_list
+import_list = 'import' LB Any RB
+
+entity	= water_entity | func | type_def
+
+type_def = 'type' (struct_type | multiline_type)
+
+multiline_type = '(' line_type* ')'
+line_type = ID generic2? '='? (anon_struct | Any) NL
+
+struct_type = ID generic2? '='? anon_struct
+
+anon_struct = 'struct' '{' Any '}'
+
+
+func = 'func' f_reciever? f_name generic2? f_args f_returns ('{' Any '}')
+	| 'func' f_reciever? f_name generic2? f_args f_returns NL
+	| 'func' f_reciever? f_name generic2? f_args NL
+
+
+f_reciever = LB Any RB 
+f_args = LB Any RB
+f_returns = Any 
+
+water_entity	=	Any 
+
+package_name =	ID
+import_name	 =	ID
+param 		 =	ID
+f_name		 =	ID
+t_name		 =	ID
+
+generic2 = '[' Any ']'
+
+
+%%
+
+%parsing {
+	recovery entity 
+	fragment STRING_INT_CODE
+	start package
+	skip COMMENT STRING NL
+}
+
+%nodes {
+	ghost entity 
+	leaf f_name
+	void LB RB
+}
+
+%customblock {
+	start("//+")
+	end("//@")
+	basetoken COMMENT
+}
+
+%markup {
+	land func
+	headercore(f_name) func
+}
