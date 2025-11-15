@@ -10,6 +10,8 @@ using System.Net.Sockets;
 using System.Net;
 using Land.Core.Parsing;
 using Land.Core.Parsing.Tree;
+using Jaeger;
+using VPTree;
 
 
 namespace MarkupServer
@@ -231,17 +233,21 @@ namespace MarkupServer
 		public Task<ListTreeResult> ListAnchorsAsync(ListTreeParams p)
 		{
 			var roots = new List<TreeNode> { };
-
 			Tracing.Init();
 
-			IEnumerable<string> gqlFiles = GetAllFiles(p.folderPath, "graphql");
 
-			var gqlAnchors = 0;
+
+			IEnumerable<string> gqlFiles = GetAllFiles(p.folderPath, "graphql");
+			List<MethodAnchor> gqlAnchors = new List<MethodAnchor>();
+
+			var gqlAnchorsCnt = 0;
 			using (var scope = Tracing.Tracer.BuildSpan("ProcessGqlFiles").StartActive())
 				foreach (var gqlFile in gqlFiles)
 				{
 					var txt = File.ReadAllText(gqlFile);
-					var root = graphqlParser.Parse(txt).Item1;
+					Node root;
+					using (Tracing.Tracer.BuildSpan("ParseGql").StartActive())
+						root = graphqlParser.Parse(txt).Item1;
 
 					var funcs = GetFuncs(root);
 					foreach (var funcsPerType in funcs)
@@ -254,7 +260,18 @@ namespace MarkupServer
 						foreach (var func in funcsPerType.Value)
 						{
 							var anchor = GetAnchorFromGqlNode(func, gqlFile);
-							gqlAnchors++;
+
+							gqlAnchors.Add(new MethodAnchor
+							{
+								ParentNameNorm = anchor.ParentNameNorm,
+								MethodNameNorm = anchor.MethodNameNorm,
+								ReturnTypeNorm = anchor.ReturnTypeNorm,
+								StartOffset = anchor.StartOffset ?? 0,
+								EndOffset = anchor.EndOffset ?? 0,
+								Args = anchor.Args.Select(x => new MethodAnchor.Arg { TypeNorm = x.TypeNorm, NameNorm = x.NameNorm }).ToList(),
+							});
+
+							gqlAnchorsCnt++;
 							var subgroup = new TreeNode
 							{
 								Name = anchor.Name,
@@ -268,6 +285,20 @@ namespace MarkupServer
 						roots.Add(group);
 					}
 				}
+
+
+			var _w = new Dist.Weights();
+			VPTree<MethodAnchor> _tree;
+			using (var scope = Tracing.Tracer.BuildSpan("BuildTree").StartActive())
+				_tree = new VPTree<MethodAnchor>(gqlAnchors, (a, b) => Dist.AnchorDistance(a, b, _w), 42);
+
+			/*for (int i = 0; i < 10; i++)
+				using (var scope = Tracing.Tracer.BuildSpan("FindPoint").StartActive())
+				{
+					var res = _tree.KNearest(gqlAnchors[i],2);
+					Debug($"{res[0].Dist} {res[1].Dist}");
+					
+				}*/
 
 			IEnumerable<string> tsFiles = GetAllFiles(p.folderPath, "ts");
 
@@ -289,7 +320,7 @@ namespace MarkupServer
 					}
 				}
 
-			Debug($"gqlAnchors={gqlAnchors}, tsAnchors={tsAnchors}");
+			Debug($"gqlAnchors={gqlAnchorsCnt}, tsAnchors={tsAnchors}");
 
 			return Task.FromResult(new ListTreeResult { Roots = roots });
 		}
