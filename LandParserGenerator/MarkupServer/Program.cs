@@ -10,7 +10,6 @@ using System.Net.Sockets;
 using System.Net;
 using Land.Core.Parsing;
 using Land.Core.Parsing.Tree;
-using VPTree;
 
 
 namespace MarkupServer
@@ -233,52 +232,64 @@ namespace MarkupServer
 		{
 			var roots = new List<TreeNode> { };
 
-			var gqlFiles = GetAllFiles(p.folderPath, "graphql");
-			foreach (var gqlFile in gqlFiles)
-			{
-				var txt = File.ReadAllText(gqlFile);
-				var root = graphqlParser.Parse(txt).Item1;
+			Tracing.Init();
 
-				var funcs = GetFuncs(root);
-				foreach (var funcsPerType in funcs)
+			IEnumerable<string> gqlFiles = GetAllFiles(p.folderPath, "graphql");
+
+			var gqlAnchors = 0;
+			using (var scope = Tracing.Tracer.BuildSpan("ProcessGqlFiles").StartActive())
+				foreach (var gqlFile in gqlFiles)
 				{
-					var group = new TreeNode
+					var txt = File.ReadAllText(gqlFile);
+					var root = graphqlParser.Parse(txt).Item1;
+
+					var funcs = GetFuncs(root);
+					foreach (var funcsPerType in funcs)
 					{
-						Name = funcsPerType.Key,
-						NodeType = "group",
-					};
-					foreach (var func in funcsPerType.Value)
-					{
-						var anchor = GetAnchorFromGqlNode(func, gqlFile);
-						var subgroup = new TreeNode
+						var group = new TreeNode
 						{
-							Name = anchor.Name,
+							Name = funcsPerType.Key,
 							NodeType = "group",
 						};
-						anchor.Name = "graphql";
-						subgroup.Children.Add(anchor);
-						group.Children.Add(subgroup);
+						foreach (var func in funcsPerType.Value)
+						{
+							var anchor = GetAnchorFromGqlNode(func, gqlFile);
+							gqlAnchors++;
+							var subgroup = new TreeNode
+							{
+								Name = anchor.Name,
+								NodeType = "group",
+							};
+							anchor.Name = "graphql";
+							subgroup.Children.Add(anchor);
+							group.Children.Add(subgroup);
+						}
+
+						roots.Add(group);
 					}
-
-					roots.Add(group);
 				}
-			}
 
-			var tsFiles = GetAllFiles(p.folderPath, "ts");
-			foreach (var tsFile in tsFiles)
-			{
-				var txt = File.ReadAllText(tsFile);
-				var root = typescriptParser.Parse(txt).Item1;
-				var nodesPerClass = GetTsNodes(root);
-				foreach (var nodes in nodesPerClass)
+			IEnumerable<string> tsFiles = GetAllFiles(p.folderPath, "ts");
+
+			var tsAnchors = 0;
+			using (var scope = Tracing.Tracer.BuildSpan("ProcessTsFiles").StartActive())
+				foreach (var tsFile in tsFiles)
 				{
-					foreach (var node in nodes.Value)
+					var txt = File.ReadAllText(tsFile);
+					var root = typescriptParser.Parse(txt).Item1;
+					var nodesPerClass = GetTsNodes(root);
+					foreach (var nodes in nodesPerClass)
 					{
-						var anchor = GetAnchorFromTsNode(node, tsFile, nodes.Key);
-						roots.Add(anchor);
+						foreach (var node in nodes.Value)
+						{
+							var anchor = GetAnchorFromTsNode(node, tsFile, nodes.Key);
+							tsAnchors++;
+							roots.Add(anchor);
+						}
 					}
 				}
-			}
+
+			Debug($"gqlAnchors={gqlAnchors}, tsAnchors={tsAnchors}");
 
 			return Task.FromResult(new ListTreeResult { Roots = roots });
 		}
