@@ -29,4 +29,7 @@ namespace MarkupServer
 
 	public class ListTreeParams { public string folderPath { get; set; } }
 	public class ListTreeResult { public List<TreeNode> Roots { get; set; } }
+
+	public class UpdateAnchorParams { public string anchorId { get; set; } }
+	public class UpdateAnchorResult { public TreeNode updatedNode { get; set; } }
 }

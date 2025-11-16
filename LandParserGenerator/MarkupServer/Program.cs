@@ -166,7 +166,7 @@ namespace MarkupServer
 
 	public class Anchor
 	{
-		public string Id;
+		public string Id = Guid.NewGuid().ToString();
 		public string Filepath;
 		public int StartOffset;
 		public int EndOffset;
@@ -205,6 +205,7 @@ namespace MarkupServer
 	{
 		private BaseParser graphqlParser;
 		private BaseParser typescriptParser;
+		private Dictionary<string, TreeNode> nodesById = new Dictionary<string, TreeNode>();
 		[JsonRpcMethod("land/initialize", UseSingleObjectParameterDeserialization = true)]
 		public Task<InitializeResult> InitializeAsync(InitializeParams p)
 		{
@@ -262,41 +263,29 @@ namespace MarkupServer
 			}
 		}
 
-
-
-		/*[JsonRpcMethod("land/listAnchors", UseSingleObjectParameterDeserialization = true)]
-		public Task<ListAnchorsResult> ListAnchorsAsync(ListAnchorsParams p)
+		[JsonRpcMethod("land/updateAnchor", UseSingleObjectParameterDeserialization = true)]
+		public Task<UpdateAnchorResult> UpdateAnchorAsync(UpdateAnchorParams p)
 		{
-			if (p == null || string.IsNullOrWhiteSpace(p.folderPath))
-				throw new ArgumentException("filePath is required");
-			return ListAnchorsCoreAsync(p.folderPath, "graphql");
+			if (!nodesById.ContainsKey(p.anchorId))
+			{
+				Debug($"not found anchor by id [{p.anchorId}]");
+				return Task.FromResult(new UpdateAnchorResult { });
+			}
+			var node = nodesById[p.anchorId];
+			// TODO update with VP TREE
+			node.StartOffset += 12;
+			return Task.FromResult(new UpdateAnchorResult
+			{
+				updatedNode = node,
+			});
 		}
 
-		private Task<ListAnchorsResult> ListAnchorsCoreAsync(string folderPath, string extension)
-		{
-			var anchors = new List<Anchor>();
-			var gqlFiles = GetAllFiles(folderPath, extension);
-			foreach (var gqlFile in gqlFiles)
-			{
-				var txt = File.ReadAllText(gqlFile);
-				var root = parser.Parse(txt).Item1;
-
-				var funcs = GetFuncs(root);
-				foreach (var func in funcs)
-				{
-					anchors.Add(GetAnchorFromNode(func, gqlFile));
-				}
-			}
-
-			return Task.FromResult(new ListAnchorsResult { folderPath = folderPath, anchors = anchors });
-		}*/
 
 		[JsonRpcMethod("land/listAnchors", UseSingleObjectParameterDeserialization = true)]
 		public Task<ListTreeResult> ListAnchorsAsync(ListTreeParams p)
 		{
 			var roots = new List<TreeNode> { };
 			Tracing.Init();
-
 
 
 			IEnumerable<string> gqlFiles = GetAllFiles(p.folderPath, "graphql");
@@ -321,26 +310,27 @@ namespace MarkupServer
 						};
 						foreach (var func in funcsPerType.Value)
 						{
-							var anchor = GetAnchorFromGqlNode(func, gqlFile);
+							var treeNode = GetTreeNodeFromGqlNode(func, gqlFile);
+							nodesById[treeNode.Id] = treeNode;
 
 							gqlAnchors.Add(new MethodAnchor
 							{
-								ParentNameNorm = anchor.ParentNameNorm,
-								MethodNameNorm = anchor.MethodNameNorm,
-								ReturnTypeNorm = anchor.ReturnTypeNorm,
-								StartOffset = anchor.StartOffset ?? 0,
-								EndOffset = anchor.EndOffset ?? 0,
-								Args = anchor.Args.Select(x => new MethodAnchor.Arg { TypeNorm = x.TypeNorm, NameNorm = x.NameNorm }).ToList(),
+								ParentNameNorm = treeNode.ParentNameNorm,
+								MethodNameNorm = treeNode.MethodNameNorm,
+								ReturnTypeNorm = treeNode.ReturnTypeNorm,
+								StartOffset = treeNode.StartOffset ?? 0,
+								EndOffset = treeNode.EndOffset ?? 0,
+								Args = treeNode.Args.Select(x => new MethodAnchor.Arg { TypeNorm = x.TypeNorm, NameNorm = x.NameNorm }).ToList(),
 							});
 
 							gqlAnchorsCnt++;
 							var subgroup = new TreeNode
 							{
-								Name = anchor.Name,
+								Name = treeNode.Name,
 								NodeType = "group",
 							};
-							anchor.Name = "graphql";
-							subgroup.Children.Add(anchor);
+							treeNode.Name = "graphql";
+							subgroup.Children.Add(treeNode);
 							group.Children.Add(subgroup);
 						}
 
@@ -359,7 +349,7 @@ namespace MarkupServer
 				{
 					var res = _tree.KNearest(gqlAnchors[i],2);
 					Debug($"{res[0].Dist} {res[1].Dist}");
-					
+
 				}*/
 
 			IEnumerable<string> tsFiles = GetAllFiles(p.folderPath, "ts");
@@ -375,9 +365,10 @@ namespace MarkupServer
 					{
 						foreach (var node in nodes.Value)
 						{
-							var anchor = GetAnchorFromTsNode(node, tsFile, nodes.Key);
+							var treeNode = GetTreeNodeFromTsNode(node, tsFile, nodes.Key);
+							nodesById[treeNode.Id] = treeNode;
 							tsAnchors++;
-							roots.Add(anchor);
+							roots.Add(treeNode);
 						}
 					}
 				}
@@ -389,7 +380,7 @@ namespace MarkupServer
 			return Task.FromResult(new ListTreeResult { Roots = roots });
 		}
 
-		private TreeNode GetAnchorFromTsNode(Node n, string filepath, string parentName)
+		private TreeNode GetTreeNodeFromTsNode(Node n, string filepath, string parentName)
 		{
 			var name = n.Children[0].ToString().Replace("ID: ", "").ToLower();
 			var args = n.Children[1].Children.Select(x => new Tuple<string, string>(
@@ -412,7 +403,7 @@ namespace MarkupServer
 			};
 		}
 
-		private TreeNode GetAnchorFromGqlNode(Node n, string filepath)
+		private TreeNode GetTreeNodeFromGqlNode(Node n, string filepath)
 		{
 			var typeName = n.Parent.Children[1].ToString().Replace("id: ", "");
 			var name = n.Children.First().ToString().Replace("id: ", "");
