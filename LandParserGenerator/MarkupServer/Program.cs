@@ -37,7 +37,7 @@ namespace MarkupServer
 					var error = messages.First(m => m.Type == MessageType.Error);
 
 					Console.Error.WriteLine($"Cannot generate parser {error.Text}");
-					Environment.Exit(1);
+					return 1;
 				}
 				else
 				{
@@ -53,6 +53,7 @@ namespace MarkupServer
 
 				Console.Error.WriteLine($"{node.Children[0]} {node.Children[0].Children[0]}");
 
+				// TCP-режим
 				if (args.Length >= 2 && args[0] == "--tcp" || true)
 				{
 					var ep = ParseEndPoint("127.0.0.1:7711"); // args[1]
@@ -61,33 +62,94 @@ namespace MarkupServer
 					var listener = new TcpListener(ep);
 					listener.Start();
 
-					using var client = await listener.AcceptTcpClientAsync(); // один клиент на сессию
-					using var stream = client.GetStream();
-					var svc = new LandService();
-					var rpc = JsonRpc.Attach(stream, stream, svc); // HeaderDelimitedMessageHandler по-умолчанию
-					Console.Error.WriteLine("[boot] client connected");
-					await rpc.Completion;
-					Console.Error.WriteLine("[boot] rpc completion");
-					return 0;
+					// слушаем клиентов в цикле
+					while (true)
+					{
+						Console.Error.WriteLine("[boot] waiting for client...");
+
+						TcpClient client = null;
+
+						try
+						{
+							client = await listener.AcceptTcpClientAsync();
+							Console.Error.WriteLine("[boot] client accepted");
+
+							using (client)
+							using (var stream = client.GetStream())
+							{
+								var svc = new LandService();
+								var rpc = JsonRpc.Attach(stream, stream, svc); // уже начинает слушать
+
+								Console.Error.WriteLine("[boot] client connected");
+
+								try
+								{
+									await rpc.Completion;
+									Console.Error.WriteLine("[boot] rpc completion (normal)");
+								}
+								catch (IOException ex)
+								{
+									// Нормальная ситуация: клиент просто закрыл соединение
+									Console.Error.WriteLine("[info] client disconnected (IO): " + ex.Message);
+								}
+								catch (ObjectDisposedException)
+								{
+									Console.Error.WriteLine("[info] client disconnected (disposed)");
+								}
+								catch (OperationCanceledException)
+								{
+									Console.Error.WriteLine("[info] client disconnected (canceled)");
+								}
+							}
+
+							// после завершения RPC-сессии просто ждём следующего клиента
+						}
+						catch (Exception ex)
+						{
+							// Любая странная ошибка при accept/handle — логируем и продолжаем слушать
+							Console.Error.WriteLine("[warn] exception while handling client: " + ex);
+						}
+					}
 				}
 				else
 				{
+					// STDIO-режим (единый клиент, после его смерти — спокойно выходим)
 					Console.Error.WriteLine("[boot] stdio mode");
+
 					using var input = Console.OpenStandardInput();
 					using var output = Console.OpenStandardOutput();
 					var svc = new LandService();
 					var rpc = JsonRpc.Attach(output, input, svc);
-					await rpc.Completion;
-					Console.Error.WriteLine("[boot] rpc completion");
+
+					try
+					{
+						await rpc.Completion;
+						Console.Error.WriteLine("[boot] rpc completion (stdio)");
+					}
+					catch (IOException ex)
+					{
+						Console.Error.WriteLine("[info] stdio disconnected (IO): " + ex.Message);
+					}
+					catch (ObjectDisposedException)
+					{
+						Console.Error.WriteLine("[info] stdio disconnected (disposed)");
+					}
+					catch (OperationCanceledException)
+					{
+						Console.Error.WriteLine("[info] stdio disconnected (canceled)");
+					}
+
 					return 0;
 				}
 			}
 			catch (Exception ex)
 			{
+				// сюда теперь не долетят нормальные "клиент отключился"
 				try { Console.Error.WriteLine("[fatal] " + ex); } catch { }
 				return 1;
 			}
 		}
+
 
 		private static IPEndPoint ParseEndPoint(string s)
 		{
@@ -319,6 +381,8 @@ namespace MarkupServer
 						}
 					}
 				}
+
+			//AnchorsIO.SaveJson(@"e:\phd\anchors.json", gqlAnchors);
 
 			Debug($"gqlAnchors={gqlAnchorsCnt}, tsAnchors={tsAnchors}");
 
