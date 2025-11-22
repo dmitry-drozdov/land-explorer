@@ -26,47 +26,7 @@ namespace MarkupServer
 			using (var scope = Tracing.Tracer.BuildSpan("ProcessGqlFiles").StartActive())
 				foreach (var gqlFile in gqlFiles)
 				{
-					var txt = File.ReadAllText(gqlFile);
-					Node root;
-					using (Tracing.Tracer.BuildSpan("ParseGql").StartActive())
-						root = graphqlParser.Parse(txt).Item1;
-
-					var funcs = GetFuncs(root);
-					foreach (var funcsPerType in funcs)
-					{
-						var group = new TreeNode
-						{
-							Name = funcsPerType.Key,
-							NodeType = "group",
-						};
-						foreach (var func in funcsPerType.Value)
-						{
-							var treeNode = GetTreeNodeFromGqlNode(func, gqlFile);
-							nodesById[treeNode.Id] = treeNode;
-
-							gqlAnchors.Add(new MethodAnchor
-							{
-								ParentNameNorm = treeNode.ParentNameNorm,
-								MethodNameNorm = treeNode.MethodNameNorm,
-								ReturnTypeNorm = treeNode.ReturnTypeNorm,
-								StartOffset = treeNode.StartOffset ?? 0,
-								EndOffset = treeNode.EndOffset ?? 0,
-								Args = treeNode.Args.Select(x => new MethodAnchor.Arg { TypeNorm = x.TypeNorm, NameNorm = x.NameNorm }).ToList(),
-							});
-
-							gqlAnchorsCnt++;
-							var subgroup = new TreeNode
-							{
-								Name = treeNode.Name,
-								NodeType = "group",
-							};
-							treeNode.Name = "graphql";
-							subgroup.Children.Add(treeNode);
-							group.Children.Add(subgroup);
-						}
-
-						roots.Add(group);
-					}
+					gqlAnchorsCnt += ParseGqlFile(gqlFile, roots, gqlAnchors);
 				}
 
 
@@ -74,6 +34,16 @@ namespace MarkupServer
 			VPTree<MethodAnchor> _tree;
 			using (var scope = Tracing.Tracer.BuildSpan("BuildTree").StartActive())
 				_tree = new VPTree<MethodAnchor>(gqlAnchors, (a, b) => Dist.AnchorDistance(a, b, _w), 42);
+
+
+			/*using (var scope = Tracing.Tracer.BuildSpan("SaveTree").StartActive())
+			{
+				var snapshot = _tree.ToSnapshot(a => a.Id);
+				VpTreeStorage.SaveJson("e:\\phd\\vp_tree.json", snapshot);
+			}
+
+			using (var scope = Tracing.Tracer.BuildSpan("LoadTree").StartActive())
+				VpTreeStorage.LoadJson("e:\\phd\\vp_tree.json");*/
 
 			/*for (int i = 0; i < 10; i++)
 				using (var scope = Tracing.Tracer.BuildSpan("FindPoint").StartActive())

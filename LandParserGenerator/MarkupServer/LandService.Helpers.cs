@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using VPTree;
 
 namespace MarkupServer
 {
@@ -105,6 +106,54 @@ namespace MarkupServer
 			var arr = returns.Select(NormalizeTypeName).ToArray();
 			if (arr.Length == 0) return "";
 			return string.Join(",", arr);
+		}
+
+		private int ParseGqlFile(string gqlFile, List<TreeNode> roots, List<MethodAnchor> gqlAnchors)
+		{
+			var gqlAnchorsCnt = 0;
+			var txt = File.ReadAllText(gqlFile);
+			Node root;
+			using (Tracing.Tracer.BuildSpan("ParseGql").StartActive())
+				root = graphqlParser.Parse(txt).Item1;
+
+			var funcs = GetFuncs(root);
+			foreach (var funcsPerType in funcs)
+			{
+				var group = new TreeNode
+				{
+					Name = funcsPerType.Key,
+					NodeType = "group",
+				};
+				foreach (var func in funcsPerType.Value)
+				{
+					var treeNode = GetTreeNodeFromGqlNode(func, gqlFile);
+					nodesById[treeNode.Id] = treeNode;
+
+					gqlAnchors.Add(new MethodAnchor
+					{
+						Id = treeNode.Id,
+						ParentNameNorm = treeNode.ParentNameNorm,
+						MethodNameNorm = treeNode.MethodNameNorm,
+						ReturnTypeNorm = treeNode.ReturnTypeNorm,
+						StartOffset = treeNode.StartOffset ?? 0,
+						EndOffset = treeNode.EndOffset ?? 0,
+						Args = treeNode.Args.Select(x => new MethodAnchor.Arg { TypeNorm = x.TypeNorm, NameNorm = x.NameNorm }).ToList(),
+					});
+
+					gqlAnchorsCnt++;
+					var subgroup = new TreeNode
+					{
+						Name = treeNode.Name,
+						NodeType = "group",
+					};
+					treeNode.Name = "graphql";
+					subgroup.Children.Add(treeNode);
+					group.Children.Add(subgroup);
+				}
+
+				roots.Add(group);
+			}
+			return gqlAnchorsCnt;
 		}
 
 		private Dictionary<string, List<Node>> GetFuncs(Node root)
