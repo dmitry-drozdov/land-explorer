@@ -167,13 +167,13 @@ namespace VPTree
 		{
 			double dName = 0, dArgs = 0, dRet = 0, dRecv = 0, dNeigh = 0;
 
-			Parallel.Invoke(
-			    () => dName = LevScaled(a?.MethodNameNorm ?? "", b?.MethodNameNorm ?? "", w.NameScale),
-			    () => dArgs = ArgsDistance(a?.Args, b?.Args, w),
-			    () => dRet = LevScaled(a?.ReturnTypeNorm ?? "", b?.ReturnTypeNorm ?? "", w.ReturnsScale),
-			    () => dRecv = LevScaled(a?.ParentNameNorm ?? "", b?.ParentNameNorm ?? "", w.ReceiverScale),
-			    () => dNeigh = WeightedJaccard(a?.NeighborBag, b?.NeighborBag)
-			);
+
+			dName = LevScaled(a?.MethodNameNorm ?? "", b?.MethodNameNorm ?? "", w.NameScale);
+			dArgs = ArgsDistance(a?.Args, b?.Args, w);
+			dRet = LevScaled(a?.ReturnTypeNorm ?? "", b?.ReturnTypeNorm ?? "", w.ReturnsScale);
+			dRecv = LevScaled(a?.ParentNameNorm ?? "", b?.ParentNameNorm ?? "", w.ReceiverScale);
+			dNeigh = WeightedJaccard(a?.NeighborBag, b?.NeighborBag);
+
 
 			return w.NameW * dName
 			     + w.ArgsW * dArgs

@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
@@ -29,7 +30,7 @@ namespace VPTree
 		private readonly Node _root;
 		private readonly Random _rng;
 
-		public VPTree(IList<T> items, Func<T, T, double> distance, int? seed = null, GlobalTracer tracer = null)
+		public VPTree(IList<T> items, Func<T, T, double> distance, int? seed = null, ITracer tracer = null)
 		{
 			if (items == null || items.Count == 0) throw new ArgumentException("items empty");
 			_items = new List<T>(items);
@@ -42,12 +43,12 @@ namespace VPTree
 
 		private readonly object _rngLock = new object();
 
-		private Node Build(List<int> idxs, GlobalTracer tracer = null)
+		private Node Build(List<int> idxs, ITracer tracer = null)
 		{
-			return BuildInternal(idxs, parallelDepth: 4, tracer: tracer);
+			return BuildInternal(idxs, parallelDepth: 0, tracer: tracer);
 		}
 
-		private Node BuildInternal(List<int> idxs, int parallelDepth, GlobalTracer tracer)
+		private Node BuildInternal(List<int> idxs, int parallelDepth, ITracer tracer)
 		{
 			if (idxs.Count == 0)
 				return null;
@@ -63,8 +64,8 @@ namespace VPTree
 
 			if (idxs.Count == 1)
 			{
-				node.Left = null; 
-				node.Right = null; 
+				node.Left = null;
+				node.Right = null;
 				node.Threshold = 0;
 				return node;
 			}
@@ -75,11 +76,32 @@ namespace VPTree
 
 			int n = idxs.Count - 1;
 			var dists = new double[n];
-			for (int i = 0; i < n; i++)
-				dists[i] = _dist(_items[vpIndex], _items[idxs[i]]);
+			/*for (int i = 0; i < n; i++)
+				//using (var scope = tracer?.BuildSpan($"dist {vpIndex} {idxs[i]}").StartActive())
+				dists[i] = _dist(_items[vpIndex], _items[idxs[i]]);*/
+
+			var opts = new ParallelOptions
+			{
+				MaxDegreeOfParallelism = 14 // стартовое значение для 16 логических
+			};
+
+			const int chunkSize = 16; // попробуй 64 и 128, выбери быстрее
+
+			var vp = _items[vpIndex];
+			var items = _items;
+			var dist = _dist;
+			Parallel.ForEach(Partitioner.Create(0, n, chunkSize), opts, range =>
+			{
+				for (int i = range.Item1; i < range.Item2; i++)
+					dists[i] = dist(vp, items[idxs[i]]);
+			});
+
 
 			// median via quickselect (average O(n))
-			double mu = QuickSelectMedian(dists);
+			double mu;
+			//using (var scope = tracer?.BuildSpan("QS").StartActive())
+			mu = QuickSelectMedian(dists);
+
 			node.Threshold = mu;
 
 			var left = new List<int>(n);
@@ -125,12 +147,11 @@ namespace VPTree
 
 		private double QuickSelect(double[] a, int left, int right, int k)
 		{
-			var rnd = _rng;
 			while (true)
 			{
 				if (left == right) return a[left];
-				int pivotIndex = left + rnd.Next(right - left + 1);
-				double pivot = a[pivotIndex];
+
+				double pivot = a[(left + right) >>> 1];
 
 				int i = left, j = right;
 				while (i <= j)

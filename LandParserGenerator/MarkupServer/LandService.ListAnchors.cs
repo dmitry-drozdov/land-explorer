@@ -33,7 +33,7 @@ namespace MarkupServer
 			var _w = new Dist.Weights();
 			VPTree<MethodAnchor> _tree;
 			using (var scope = Tracing.Tracer.BuildSpan("BuildTree").StartActive())
-				_tree = new VPTree<MethodAnchor>(gqlAnchors, (a, b) => Dist.AnchorDistance(a, b, _w), 42);
+				_tree = new VPTree<MethodAnchor>(gqlAnchors, (a, b) => Dist.AnchorDistance(a, b, _w), 42, Tracing.Tracer);
 
 
 			/*using (var scope = Tracing.Tracer.BuildSpan("SaveTree").StartActive())
