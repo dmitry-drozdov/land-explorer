@@ -41,14 +41,16 @@ namespace MarkupServer
 			using (var scope = Tracing.Tracer.BuildSpan("BuildTree").StartActive())
 				_tree = new VPTree<MethodAnchor>(gqlAnchors, (a, b) => Dist.AnchorDistance(a, b, _w), 42, Tracing.Tracer);
 
-			var cands = _tree.KNearest(new MethodAnchor
-			{
-				Id = node.Id,
-				ParentNameNorm = node.ParentNameNorm,
-				ReturnTypeNorm = node.ReturnTypeNorm,
-				MethodNameNorm = node.MethodNameNorm,
-				Args = node.Args.Select(x => new MethodAnchor.Arg { TypeNorm = x.TypeNorm, NameNorm = x.NameNorm }).ToList(),
-			}, 1);
+			List<VPTree<MethodAnchor>.KNNResult> cands;
+			using (var scope = Tracing.Tracer.BuildSpan("KNearest").StartActive())
+				cands = _tree.KNearest(new MethodAnchor
+				{
+					Id = node.Id,
+					ParentNameNorm = node.ParentNameNorm,
+					ReturnTypeNorm = node.ReturnTypeNorm,
+					MethodNameNorm = node.MethodNameNorm,
+					Args = node.Args.Select(x => new MethodAnchor.Arg { TypeNorm = x.TypeNorm, NameNorm = x.NameNorm }).ToList(),
+				}, 1);
 
 			Debug($"{cands[0].Dist}");
 
