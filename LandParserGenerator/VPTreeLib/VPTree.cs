@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Buffers;
 using System.Diagnostics;
 using System.Linq;
 using System.Runtime.CompilerServices;
@@ -18,62 +17,6 @@ namespace VPTree
 	// =======================
 	public sealed partial class VPTree<T>
 	{
-		// -----------------------
-		// Build profiling helpers
-		// -----------------------
-		private sealed class BuildStats
-		{
-			public long Nodes;
-			public long DistanceCalls;
-			public long DistanceTicks;
-			public long DistanceParallelTrue;
-			public long DistanceParallelFalse;
-			public long QuickSelectTicks;
-			public long PartitionTicks;
-			public long VpSelectTicks;
-			public long RecurseTicks;
-			public int MaxDepth;
-			public long MaxN;
-
-			[MethodImpl(MethodImplOptions.AggressiveInlining)]
-			public void ObserveNode(int depth, int n)
-			{
-				System.Threading.Interlocked.Increment(ref Nodes);
-				if (depth > MaxDepth) MaxDepth = depth;
-				if (n > MaxN) MaxN = n;
-			}
-
-			[MethodImpl(MethodImplOptions.AggressiveInlining)]
-			public void AddDistance(int calls, long ticks)
-			{
-				System.Threading.Interlocked.Add(ref DistanceCalls, calls);
-				System.Threading.Interlocked.Add(ref DistanceTicks, ticks);
-			}
-
-			[MethodImpl(MethodImplOptions.AggressiveInlining)]
-			public void AddDistanceParallel(bool usedParallel)
-			{
-				if (usedParallel)
-					System.Threading.Interlocked.Increment(ref DistanceParallelTrue);
-				else
-					System.Threading.Interlocked.Increment(ref DistanceParallelFalse);
-			}
-
-			[MethodImpl(MethodImplOptions.AggressiveInlining)]
-			public void AddQuickSelect(long ticks) => System.Threading.Interlocked.Add(ref QuickSelectTicks, ticks);
-			[MethodImpl(MethodImplOptions.AggressiveInlining)]
-			public void AddPartition(long ticks) => System.Threading.Interlocked.Add(ref PartitionTicks, ticks);
-			[MethodImpl(MethodImplOptions.AggressiveInlining)]
-			public void AddVpSelect(long ticks) => System.Threading.Interlocked.Add(ref VpSelectTicks, ticks);
-			[MethodImpl(MethodImplOptions.AggressiveInlining)]
-			public void AddRecurse(long ticks) => System.Threading.Interlocked.Add(ref RecurseTicks, ticks);
-		}
-
-		private const int TraceBuildMaxDepth = 2; // не раздуваем Jaeger тысячами спанов
-		// После оптимизаций distance() стала значительно дешевле, поэтому включать параллель слишком рано
-		// зачастую невыгодно из-за overhead планировщика.
-		private const int ParallelDistanceThreshold = 4096;
-
 		private sealed class Node
 		{
 			public int Index;
@@ -93,233 +36,113 @@ namespace VPTree
 			_items = new List<T>(items);
 			_dist = distance ?? throw new ArgumentNullException("distance");
 			_rng = new Random(seed ?? 42);
-			// На большом n критично минимизировать аллокации в билде.
-			// Работаем с одним массивом индексов и передаём диапазоны (start/len),
-			// чтобы не создавать List<int> на каждом узле.
-			var idxs = Enumerable.Range(0, _items.Count).ToArray();
-
-			var stats = new BuildStats();
-			using (var scope = tracer?.BuildSpan("VP.Build").StartActive())
-			{
-				// Aggregated distance breakdown (cheap, no extra spans)
-				Dist.Prof.Reset();
-
-				var span = scope?.Span;
-				span?.SetTag("vp.items.count", _items.Count);
-				span?.SetTag("vp.seed", seed ?? 42);
-				span?.SetTag("vp.parallel.dist.threshold", ParallelDistanceThreshold);
-				span?.SetTag("vp.trace.maxDepth", TraceBuildMaxDepth);
-				_root = Build(idxs, tracer, stats);
-
-				// Сводка по билду (все в одном спане, чтобы было легко сравнивать запуски)
-				span?.SetTag("vp.build.nodes", stats.Nodes);
-				span?.SetTag("vp.build.maxDepth", stats.MaxDepth);
-				span?.SetTag("vp.build.maxN", stats.MaxN);
-				span?.SetTag("vp.build.dist.calls", stats.DistanceCalls);
-				span?.SetTag("vp.build.dist.ms", TicksToMs(stats.DistanceTicks));
-				span?.SetTag("vp.build.dist.parallel.true.count", stats.DistanceParallelTrue);
-				span?.SetTag("vp.build.dist.parallel.false.count", stats.DistanceParallelFalse);
-				span?.SetTag("vp.build.quickselect.ms", TicksToMs(stats.QuickSelectTicks));
-				span?.SetTag("vp.build.partition.ms", TicksToMs(stats.PartitionTicks));
-				span?.SetTag("vp.build.vpselect.ms", TicksToMs(stats.VpSelectTicks));
-				span?.SetTag("vp.build.recurse.ms", TicksToMs(stats.RecurseTicks));
-
-				var d = Dist.Prof.Snapshot();
-				span?.SetTag("dist.calls", d.calls);
-				span?.SetTag("dist.calls.lev", d.callsLev);
-				span?.SetTag("dist.calls.args", d.callsArgs);
-				span?.SetTag("dist.calls.jacc", d.callsJacc);
-				span?.SetTag("dist.ms.total", Dist.Prof.TickToMs(d.ticksTotal));
-				span?.SetTag("dist.ms.name", Dist.Prof.TickToMs(d.ticksName));
-				span?.SetTag("dist.ms.args", Dist.Prof.TickToMs(d.ticksArgs));
-				span?.SetTag("dist.ms.ret", Dist.Prof.TickToMs(d.ticksRet));
-				span?.SetTag("dist.ms.recv", Dist.Prof.TickToMs(d.ticksRecv));
-				span?.SetTag("dist.ms.neigh", Dist.Prof.TickToMs(d.ticksNeigh));
-				span?.SetTag("dist.lev.chars.total", d.charsLev);
-				span?.SetTag("dist.args.pairs.total", d.argsPairs);
-				span?.SetTag("dist.neigh.iter.min.total", d.neighMinIter);
-				span?.SetTag("dist.args.n.max", d.argsNMax);
-				span?.SetTag("dist.args.n.gt10.count", d.argsNGt10);
-				span?.SetTag("dist.args.n.hist", Dist.Prof.GetArgsNHistogramString());
-			}
+			var idxs = Enumerable.Range(0, _items.Count).ToList();
+			using (var scope = tracer?.BuildSpan("Build").StartActive())
+				_root = Build(idxs, tracer);
 		}
 
 		private readonly object _rngLock = new object();
 
-		private static double TicksToMs(long ticks)
+		private Node Build(List<int> idxs, ITracer tracer = null)
 		{
-			// Stopwatch.Frequency ticks/sec
-			return ticks <= 0 ? 0.0 : (ticks * 1000.0) / Stopwatch.Frequency;
+			return BuildInternal(idxs, parallelDepth: 0, tracer: tracer);
 		}
 
-		private Node Build(int[] idxs, ITracer tracer, BuildStats stats)
+		private Node BuildInternal(List<int> idxs, int parallelDepth, ITracer tracer)
 		{
-			return BuildInternal(idxs, start: 0, len: idxs.Length, depth: 0, parallelDepth: 0, tracer: tracer, stats: stats);
-		}
-
-		/// <summary>
-		/// Построение на одном массиве индексов с передачей диапазонов.
-		/// Это убирает два самых дорогих источника overhead на больших данных:
-		///  1) создание List&lt;int&gt; left/right на каждом узле
-		///  2) массовые аллокации double[] на каждом узле (берём из ArrayPool)
-		/// </summary>
-		private Node BuildInternal(int[] idxs, int start, int len, int depth, int parallelDepth, ITracer tracer, BuildStats stats)
-		{
-			if (len <= 0)
+			if (idxs.Count == 0)
 				return null;
 
-			stats?.ObserveNode(depth, len);
+			var node = new Node();
 
-			// Ограничиваем количество спанов: только верхние уровни.
-			IScope nodeScope = null;
-			if (tracer != null && depth <= TraceBuildMaxDepth)
+			int vpPos;
+			lock (_rngLock)                       // Random не потокобезопасен
+				vpPos = _rng.Next(idxs.Count);
+
+			int vpIndex = idxs[vpPos];
+			node.Index = vpIndex;
+
+			if (idxs.Count == 1)
 			{
-				nodeScope = tracer.BuildSpan("VP.BuildNode")
-					.WithTag("vp.depth", depth)
-					.WithTag("vp.n", len)
-					.StartActive();
-			}
-
-			double[] dists = null;
-			int n = 0;
-			try
-			{
-				var node = new Node();
-
-				var sw = Stopwatch.StartNew();
-				int vpPos;
-				lock (_rngLock)                       // Random не потокобезопасен
-					vpPos = _rng.Next(len);
-				sw.Stop();
-				stats?.AddVpSelect(sw.ElapsedTicks);
-
-				int vpIndex = idxs[start + vpPos];
-				node.Index = vpIndex;
-				nodeScope?.Span?.SetTag("vp.vpIndex", vpIndex);
-
-				if (len == 1)
-				{
-					node.Left = null;
-					node.Right = null;
-					node.Threshold = 0;
-					return node;
-				}
-
-				// move vp to end of this segment
-				int last = start + len - 1;
-				int vpAbs = start + vpPos;
-				int t = idxs[vpAbs]; idxs[vpAbs] = idxs[last]; idxs[last] = t;
-
-				n = len - 1;
-				dists = ArrayPool<double>.Shared.Rent(n);
-
-				bool usedParallel = false;
-				var distSw = Stopwatch.StartNew();
-				{
-					var vp = _items[vpIndex];
-					var items = _items;
-					var dist = _dist;
-
-					if (n >= ParallelDistanceThreshold)
-					{
-						usedParallel = true;
-						var opts = new ParallelOptions
-						{
-							// Cap DOP for better stability on small/medium workloads.
-							MaxDegreeOfParallelism = Math.Max(1, Math.Min(Environment.ProcessorCount / 2, 8))
-						};
-
-						const int chunkSize = 128;
-						Parallel.ForEach(Partitioner.Create(0, n, chunkSize), opts, range =>
-						{
-							for (int i = range.Item1; i < range.Item2; i++)
-								dists[i] = dist(vp, items[idxs[start + i]]);
-						});
-					}
-					else
-					{
-						for (int i = 0; i < n; i++)
-							dists[i] = dist(vp, items[idxs[start + i]]);
-					}
-				}
-				distSw.Stop();
-				nodeScope?.Span?.SetTag("vp.dist.parallel", usedParallel);
-				nodeScope?.Span?.SetTag("vp.dist.n", n);
-				nodeScope?.Span?.SetTag("vp.dist.ms", TicksToMs(distSw.ElapsedTicks));
-				stats?.AddDistance(n, distSw.ElapsedTicks);
-				stats?.AddDistanceParallel(usedParallel);
-
-				// median via quickselect (average O(n))
-				double mu;
-				var qsSw = Stopwatch.StartNew();
-				mu = QuickSelectMedianInPlace(dists, n);
-				qsSw.Stop();
-				stats?.AddQuickSelect(qsSw.ElapsedTicks);
-				nodeScope?.Span?.SetTag("vp.qs.ms", TicksToMs(qsSw.ElapsedTicks));
-
-				node.Threshold = mu;
-
-				// in-place partition: переставляем и idxs[start..start+n) и dists[0..n)
-				var partSw = Stopwatch.StartNew();
-				int leftLen = 0;
-				for (int i = 0; i < n; i++)
-				{
-					if (dists[i] <= mu)
-					{
-						if (i != leftLen)
-						{
-							double td = dists[i]; dists[i] = dists[leftLen]; dists[leftLen] = td;
-							int ti = idxs[start + i]; idxs[start + i] = idxs[start + leftLen]; idxs[start + leftLen] = ti;
-						}
-						leftLen++;
-					}
-				}
-				int rightLen = n - leftLen;
-				partSw.Stop();
-				stats?.AddPartition(partSw.ElapsedTicks);
-				nodeScope?.Span?.SetTag("vp.partition.left", leftLen);
-				nodeScope?.Span?.SetTag("vp.partition.right", rightLen);
-				nodeScope?.Span?.SetTag("vp.partition.ms", TicksToMs(partSw.ElapsedTicks));
-
-				var recSw = Stopwatch.StartNew();
-				if (parallelDepth > 0 && leftLen > 0 && rightLen > 0)
-				{
-					Node leftNode = null, rightNode = null;
-					Parallel.Invoke(
-						() => leftNode = BuildInternal(idxs, start, leftLen, depth + 1, parallelDepth - 1, tracer, stats),
-						() => rightNode = BuildInternal(idxs, start + leftLen, rightLen, depth + 1, parallelDepth - 1, tracer, stats)
-					);
-					node.Left = leftNode;
-					node.Right = rightNode;
-				}
-				else
-				{
-					node.Left = leftLen > 0 ? BuildInternal(idxs, start, leftLen, depth + 1, 0, tracer, stats) : null;
-					node.Right = rightLen > 0 ? BuildInternal(idxs, start + leftLen, rightLen, depth + 1, 0, tracer, stats) : null;
-				}
-				recSw.Stop();
-				stats?.AddRecurse(recSw.ElapsedTicks);
-				nodeScope?.Span?.SetTag("vp.recurse.ms", TicksToMs(recSw.ElapsedTicks));
-
+				node.Left = null;
+				node.Right = null;
+				node.Threshold = 0;
 				return node;
 			}
-			finally
+
+			// move vp to end
+			int last = idxs.Count - 1;
+			int tmp = idxs[vpPos]; idxs[vpPos] = idxs[last]; idxs[last] = tmp;
+
+			int n = idxs.Count - 1;
+			var dists = new double[n];
+			/*for (int i = 0; i < n; i++)
+				//using (var scope = tracer?.BuildSpan($"dist {vpIndex} {idxs[i]}").StartActive())
+				dists[i] = _dist(_items[vpIndex], _items[idxs[i]]);*/
+
+			var opts = new ParallelOptions
 			{
-				if (dists != null)
-					ArrayPool<double>.Shared.Return(dists, clearArray: false);
-				nodeScope?.Dispose();
+				MaxDegreeOfParallelism = 14 // стартовое значение для 16 логических
+			};
+
+			const int chunkSize = 16; // попробуй 64 и 128, выбери быстрее
+
+			var vp = _items[vpIndex];
+			var items = _items;
+			var dist = _dist;
+			Parallel.ForEach(Partitioner.Create(0, n, chunkSize), opts, range =>
+			{
+				for (int i = range.Item1; i < range.Item2; i++)
+					dists[i] = dist(vp, items[idxs[i]]);
+			});
+
+
+			// median via quickselect (average O(n))
+			double mu;
+			//using (var scope = tracer?.BuildSpan("QS").StartActive())
+			mu = QuickSelectMedian(dists);
+
+			node.Threshold = mu;
+
+			var left = new List<int>(n);
+			var right = new List<int>(n);
+			for (int i = 0; i < n; i++)
+			{
+				if (dists[i] <= mu) left.Add(idxs[i]);
+				else right.Add(idxs[i]);
 			}
+
+			// Параллелим ТОЛЬКО первые два уровня (parallelDepth > 0).
+			if (parallelDepth > 0 && left.Count > 0 && right.Count > 0)
+			{
+				Node leftNode = null, rightNode = null;
+
+				Parallel.Invoke(
+				    () => leftNode = BuildInternal(left, parallelDepth - 1, tracer),
+				    () => rightNode = BuildInternal(right, parallelDepth - 1, tracer)
+				);
+
+				node.Left = leftNode;
+				node.Right = rightNode;
+			}
+			else
+			{
+				// Дальше – строго последовательно
+				node.Left = left.Count > 0 ? BuildInternal(left, 0, tracer) : null;
+				node.Right = right.Count > 0 ? BuildInternal(right, 0, tracer) : null;
+			}
+
+			return node;
 		}
 
-		/// <summary>
-		/// Median via QuickSelect, in-place (не копирует массив, чтобы не плодить GC на каждом узле).
-		/// ВНИМАНИЕ: мутирует arr.
-		/// </summary>
-		private double QuickSelectMedianInPlace(double[] arr, int len)
+		private double QuickSelectMedian(double[] arr)
 		{
-			if (len <= 0) return 0.0;
-			int k = len / 2;
-			return QuickSelect(arr, 0, len - 1, k);
+			int n = arr.Length;
+			if (n == 0) return 0.0;
+			int k = n / 2;
+			var a = new double[n];
+			Array.Copy(arr, a, n);
+			return QuickSelect(a, 0, n - 1, k);
 		}
 
 		private double QuickSelect(double[] a, int left, int right, int k)
