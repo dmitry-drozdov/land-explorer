@@ -35,11 +35,6 @@ namespace VPTree
 			public int MaxDepth;
 			public long MaxN;
 
-
-			public long DegenerateSplits;
-			public long MuIsOneSplits;
-			public long MedianEqTotal;
-			public int MedianEqMax;
 			[MethodImpl(MethodImplOptions.AggressiveInlining)]
 			public void ObserveNode(int depth, int n)
 			{
@@ -72,31 +67,11 @@ namespace VPTree
 			public void AddVpSelect(long ticks) => System.Threading.Interlocked.Add(ref VpSelectTicks, ticks);
 			[MethodImpl(MethodImplOptions.AggressiveInlining)]
 			public void AddRecurse(long ticks) => System.Threading.Interlocked.Add(ref RecurseTicks, ticks);
-
-			[MethodImpl(MethodImplOptions.AggressiveInlining)]
-			public void AddDegenerateSplit(bool degenerate)
-			{
-				if (degenerate) System.Threading.Interlocked.Increment(ref DegenerateSplits);
-			}
-
-			[MethodImpl(MethodImplOptions.AggressiveInlining)]
-			public void AddMuIsOne(bool isOne)
-			{
-				if (isOne) System.Threading.Interlocked.Increment(ref MuIsOneSplits);
-			}
-
-			[MethodImpl(MethodImplOptions.AggressiveInlining)]
-			public void AddMedianEq(int eq)
-			{
-				System.Threading.Interlocked.Add(ref MedianEqTotal, eq);
-				if (eq > MedianEqMax) MedianEqMax = eq;
-			}
 		}
 
-
 		private const int TraceBuildMaxDepth = 2; // не раздуваем Jaeger тысячами спанов
-							  // После оптимизаций distance() стала значительно дешевле, поэтому включать параллель слишком рано
-							  // зачастую невыгодно из-за overhead планировщика.
+		// После оптимизаций distance() стала значительно дешевле, поэтому включать параллель слишком рано
+		// зачастую невыгодно из-за overhead планировщика.
 		private const int ParallelDistanceThreshold = 4096;
 
 		private sealed class Node
@@ -148,10 +123,6 @@ namespace VPTree
 				span?.SetTag("vp.build.partition.ms", TicksToMs(stats.PartitionTicks));
 				span?.SetTag("vp.build.vpselect.ms", TicksToMs(stats.VpSelectTicks));
 				span?.SetTag("vp.build.recurse.ms", TicksToMs(stats.RecurseTicks));
-				span?.SetTag("vp.build.degenerateSplits", stats.DegenerateSplits);
-				span?.SetTag("vp.build.muIsOneSplits", stats.MuIsOneSplits);
-				span?.SetTag("vp.build.medianEq.total", stats.MedianEqTotal);
-				span?.SetTag("vp.build.medianEq.max", stats.MedianEqMax);
 
 				var d = Dist.Prof.Snapshot();
 				span?.SetTag("dist.calls", d.calls);
@@ -276,39 +247,41 @@ namespace VPTree
 				nodeScope?.Span?.SetTag("vp.dist.n", n);
 				nodeScope?.Span?.SetTag("vp.dist.ms", TicksToMs(distSw.ElapsedTicks));
 				stats?.AddDistance(n, distSw.ElapsedTicks);
-				stats?.AddDistanceParallel(usedParallel);// median via quickselect (average O(n))
-									 // IMPORTANT: keep dists[i] paired with idxs[start+i]. We select median in-place on both arrays.
+				stats?.AddDistanceParallel(usedParallel);
+
+				// median via quickselect (average O(n))
 				double mu;
 				var qsSw = Stopwatch.StartNew();
-				mu = QuickSelectMedianPairInPlace(dists, idxs, idxBase: start, len: n);
+				mu = QuickSelectMedianInPlace(dists, n);
 				qsSw.Stop();
 				stats?.AddQuickSelect(qsSw.ElapsedTicks);
 				nodeScope?.Span?.SetTag("vp.qs.ms", TicksToMs(qsSw.ElapsedTicks));
 
 				node.Threshold = mu;
 
-				// 3-way partition (<mu, ==mu, >mu) + choose a balanced split inside the ==mu band.
+				// in-place partition: переставляем и idxs[start..start+n) и dists[0..n)
 				var partSw = Stopwatch.StartNew();
-				int targetLeft = n / 2;
-				int lt, eq, gt;
-				int leftLen = Partition3WayAndChooseLeft(dists, idxs, idxBase: start, n: n, mu: mu, targetLeft: targetLeft, out lt, out eq, out gt);
+				int leftLen = 0;
+				for (int i = 0; i < n; i++)
+				{
+					if (dists[i] <= mu)
+					{
+						if (i != leftLen)
+						{
+							double td = dists[i]; dists[i] = dists[leftLen]; dists[leftLen] = td;
+							int ti = idxs[start + i]; idxs[start + i] = idxs[start + leftLen]; idxs[start + leftLen] = ti;
+						}
+						leftLen++;
+					}
+				}
 				int rightLen = n - leftLen;
 				partSw.Stop();
 				stats?.AddPartition(partSw.ElapsedTicks);
-				stats?.AddDegenerateSplit(leftLen == 0 || rightLen == 0);
-				stats?.AddMuIsOne(mu == 1.0);
-				stats?.AddMedianEq(eq);
-
-				nodeScope?.Span?.SetTag("vp.mu", mu);
-				nodeScope?.Span?.SetTag("vp.split.targetLeft", targetLeft);
-				nodeScope?.Span?.SetTag("vp.split.lt", lt);
-				nodeScope?.Span?.SetTag("vp.split.eq", eq);
-				nodeScope?.Span?.SetTag("vp.split.gt", gt);
 				nodeScope?.Span?.SetTag("vp.partition.left", leftLen);
 				nodeScope?.Span?.SetTag("vp.partition.right", rightLen);
 				nodeScope?.Span?.SetTag("vp.partition.ms", TicksToMs(partSw.ElapsedTicks));
 
-
+				var recSw = Stopwatch.StartNew();
 				if (parallelDepth > 0 && leftLen > 0 && rightLen > 0)
 				{
 					Node leftNode = null, rightNode = null;
@@ -324,9 +297,9 @@ namespace VPTree
 					node.Left = leftLen > 0 ? BuildInternal(idxs, start, leftLen, depth + 1, 0, tracer, stats) : null;
 					node.Right = rightLen > 0 ? BuildInternal(idxs, start + leftLen, rightLen, depth + 1, 0, tracer, stats) : null;
 				}
-				/*recSw.Stop();
+				recSw.Stop();
 				stats?.AddRecurse(recSw.ElapsedTicks);
-				nodeScope?.Span?.SetTag("vp.recurse.ms", TicksToMs(recSw.ElapsedTicks));*/
+				nodeScope?.Span?.SetTag("vp.recurse.ms", TicksToMs(recSw.ElapsedTicks));
 
 				return node;
 			}
@@ -373,128 +346,6 @@ namespace VPTree
 				else if (k >= i) left = i;
 				else return a[k];
 			}
-		}
-
-		/// <summary>
-		/// Median via QuickSelect, in-place, but keeps (dists[i] &lt;-&gt; idxs[idxBase+i]) pairing.
-		/// We use the lower median for even len: k = (len-1)/2.
-		/// </summary>
-		private double QuickSelectMedianPairInPlace(double[] dists, int[] idxs, int idxBase, int len)
-		{
-			if (len <= 0) return 0.0;
-			int k = (len - 1) / 2;
-			return QuickSelectPair(dists, idxs, idxBase, 0, len - 1, k);
-		}
-
-		private double QuickSelectPair(double[] a, int[] idxs, int idxBase, int left, int right, int k)
-		{
-			while (true)
-			{
-				if (left == right) return a[left];
-
-				double pivot = a[(left + right) >>> 1];
-
-				int i = left, j = right;
-				while (i <= j)
-				{
-					while (a[i] < pivot) i++;
-					while (a[j] > pivot) j--;
-					if (i <= j)
-					{
-						Swap(a, i, j);
-						Swap(idxs, idxBase + i, idxBase + j);
-						i++; j--;
-					}
-				}
-
-				if (k <= j) right = j;
-				else if (k >= i) left = i;
-				else return a[k];
-			}
-		}
-
-		/// <summary>
-		/// 3-way partition around mu and choose a balanced split point.
-		/// After partition:
-		///   [0..lt)      : &lt; mu
-		///   [lt..gtStart): == mu
-		///   [gtStart..n) : &gt; mu
-		/// We then pick leftLen inside the == band to keep sizes balanced, while preserving VP-tree invariants:
-		///   Left distances &lt;= mu, Right distances &gt;= mu.
-		/// </summary>
-		private static int Partition3WayAndChooseLeft(
-			double[] dists,
-			int[] idxs,
-			int idxBase,
-			int n,
-			double mu,
-			int targetLeft,
-			out int lt,
-			out int eq,
-			out int gt)
-		{
-			int l = 0;
-			int i = 0;
-			int r = n - 1;
-
-			while (i <= r)
-			{
-				double v = dists[i];
-				if (v < mu)
-				{
-					if (i != l)
-					{
-						Swap(dists, i, l);
-						Swap(idxs, idxBase + i, idxBase + l);
-					}
-					i++; l++;
-				}
-				else if (v > mu)
-				{
-					if (i != r)
-					{
-						Swap(dists, i, r);
-						Swap(idxs, idxBase + i, idxBase + r);
-					}
-					r--;
-				}
-				else
-				{
-					i++;
-				}
-			}
-
-			lt = l;
-			int gtStart = r + 1;
-			eq = gtStart - l;
-			gt = n - gtStart;
-
-			// Choose a split point within the ==mu band to keep counts balanced,
-			// but never move elements &lt; mu to the right or &gt; mu to the left.
-			int leftLen = targetLeft;
-			if (leftLen < lt) leftLen = lt;
-			else if (leftLen > gtStart) leftLen = gtStart;
-
-			// Avoid completely empty child (when possible)
-			if (n > 1)
-			{
-				if (leftLen == 0) leftLen = 1;
-				else if (leftLen == n) leftLen = n - 1;
-			}
-
-			return leftLen;
-		}
-
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		private static void Swap(double[] a, int i, int j)
-		{
-			double t = a[i]; a[i] = a[j]; a[j] = t;
-		}
-
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		private static void Swap(int[] a, int i, int j)
-		{
-			int t = a[i]; a[i] = a[j]; a[j] = t;
 		}
 
 		public sealed class KNNResult
