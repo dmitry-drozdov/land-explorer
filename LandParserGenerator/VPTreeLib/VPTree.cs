@@ -95,6 +95,14 @@ namespace VPTree
 					scope.Span.SetTag("vptree.build.max_imbalance_depth", _buildMaxImbalanceDepth);
 					scope.Span.SetTag("vptree.eqdiag.used", _eqDiagUsed);
 
+					scope.Span.SetTag("vptree.build.eq_total", _buildEqTotal);
+					scope.Span.SetTag("vptree.build.compared_total", _buildComparedTotal);
+					scope.Span.SetTag("vptree.build.eq_total_ratio", _buildComparedTotal > 0 ? (double)_buildEqTotal / (double)_buildComparedTotal : 0.0);
+					scope.Span.SetTag("vptree.build.max_equal", _buildMaxEqual);
+					scope.Span.SetTag("vptree.build.max_equal_n", _buildMaxEqualN);
+					scope.Span.SetTag("vptree.build.max_equal_depth", _buildMaxEqualDepth);
+
+
 
 					int depth = ComputeDepth(_root);
 					scope.Span.SetTag("vptree.build.depth", depth);
@@ -123,6 +131,13 @@ private const int _eqDiagBudget = 24; // keep small: each diag computes componen
 		private double _buildMaxImbalanceRatio;
 		private int _buildMaxImbalanceN;
 		private int _buildMaxImbalanceDepth;
+
+		private long _buildEqTotal;            // sum of 'equal' over all partitions
+		private long _buildComparedTotal;      // sum of 'n' over all partitions
+		private int _buildMaxEqual;            // max 'equal' observed (filtered)
+		private int _buildMaxEqualN;           // corresponding n
+		private int _buildMaxEqualDepth;       // corresponding depth
+
 
 
 		/// <summary>
@@ -511,12 +526,25 @@ private Node BuildInternal(List<int> idxs, int parallelDepth, ITracer tracer)
 			double eqRatio = n > 0 ? (double)equal / (double)n : 0.0;
 			double imbalanceRatio = n > 0 ? (double)(leftCount > rightCount ? leftCount : rightCount) / (double)n : 0.0;
 
+			// Track total amount of ties (d == mu)
+			Interlocked.Add(ref _buildEqTotal, equal);
+			Interlocked.Add(ref _buildComparedTotal, n);
+
+
 			if (eqRatio >= 0.50)
 				Interlocked.Increment(ref _buildLargeEq);
 
 			// Track worst cases (for Jaeger tags on the "Build" span)
 			lock (_buildStatsLock)
 			{
+				// Track biggest absolute tie bucket (ignore tiny n to avoid leaf noise)
+				if (n >= 16 && equal > _buildMaxEqual)
+				{
+					_buildMaxEqual = equal;
+					_buildMaxEqualN = n;
+					_buildMaxEqualDepth = depth;
+				}
+
 				if (eqRatio > _buildMaxEqRatio)
 				{
 					_buildMaxEqRatio = eqRatio;
