@@ -635,7 +635,7 @@ namespace VPTree
 			int n = A.Count > B.Count ? A.Count : B.Count;
 			if (n == 0) return 0.0;
 
-			double wt = 1.0, wn = 1.0;
+			double wt = 1.0, wn = 0.5;
 			double nullCost = ArgNullCost(wt, 0.0); // только тип, имена не штрафуем
 
 			var C = new double[n, n];
