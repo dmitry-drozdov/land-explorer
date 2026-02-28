@@ -5,28 +5,61 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Security.Cryptography;
 using VPTree;
 
 namespace MarkupServer
 {
 	public partial class LandService
 	{
+		private static string Sha256Hex(string s)
+		{
+			var bytes = Encoding.UTF8.GetBytes(s);
+			var hash = SHA256.HashData(bytes);
+			var sb = new StringBuilder(hash.Length * 2);
+			foreach (var b in hash)
+				sb.Append(b.ToString("x2"));
+			return sb.ToString();
+		}
+
+		private static string NewAnchorId(string kind)
+		{
+			// ВАЖНО: ID якоря НЕ должен зависеть ни от offsets, ни от имени метода/поля.
+			// Иначе при редактировании текста или при rename якорь перестанет находиться по id.
+			//
+			// Логика перепривязки (updateAnchor) использует этот id как «идентификатор сущности якоря»
+			// и достаёт по нему признаки старой версии из кэша (nodesById).
+			// Поэтому id должен быть стабильным хотя бы в рамках одной сессии (между listAnchors и updateAnchor).
+			return $"{kind}:{Guid.NewGuid():N}";
+		}
+
+		private static string MakeGroupId(string kind, params string[] parts)
+		{
+			// Группы можно идентифицировать детерминированно (чтобы дерево не прыгало).
+			var key = kind + "|" + string.Join("|", parts.Select(p => p ?? ""));
+			return $"{kind}:{Sha256Hex(key)}";
+		}
+
 		private TreeNode GetTreeNodeFromTsNode(Node n, string filepath, string parentName)
 		{
+			filepath = Path.GetFullPath(filepath);
 			var name = n.Children[0].ToString().Replace("ID: ", "").ToLower();
 			var args = n.Children[1].Children.Select(x => new Tuple<string, string>(
 				x.ToString().Replace("arg", ""),
 				"")).
 				Where(x => x.Item1 != "").ToList();
 
+			var start = n.Location.Start.Offset;
+			var end = n.Location.End.Offset;
+
 			return new TreeNode
 			{
-				Id = n.Id.ToString(),
+				Id = NewAnchorId("ts"),
 				Name = name,
 				NodeType = "anchor",
 				Filepath = filepath,
-				StartOffset = n.Location.Start.Offset,
-				EndOffset = n.Location.End.Offset,
+				StartOffset = start,
+				EndOffset = end,
 				MethodNameNorm = NormalizeName(name),
 				ParentNameNorm = NormalizeName(parentName),
 				ReturnTypeNorm = NormalizeReturnTypes(new List<string> { "" }),
@@ -36,6 +69,7 @@ namespace MarkupServer
 
 		private TreeNode GetTreeNodeFromGqlNode(Node n, string filepath)
 		{
+			filepath = Path.GetFullPath(filepath);
 			var typeName = n.Parent.Children[1].ToString().Replace("id: ", "");
 			var name = n.Children.First().ToString().Replace("id: ", "");
 
@@ -48,14 +82,17 @@ namespace MarkupServer
 
 			var returnType = n.Children.Last().Children.First(y => y.ToString() != "LSB: [").ToString().Replace("id: ", "");
 
+			var start = n.Location.Start.Offset;
+			var end = n.Location.End.Offset;
+
 			return new TreeNode
 			{
-				Id = n.Id.ToString(),
+				Id = NewAnchorId("gql"),
 				Name = name,
 				NodeType = "anchor",
 				Filepath = filepath,
-				StartOffset = n.Location.Start.Offset,
-				EndOffset = n.Location.End.Offset,
+				StartOffset = start,
+				EndOffset = end,
 				MethodNameNorm = NormalizeName(name),
 				ParentNameNorm = NormalizeName(typeName),
 				ReturnTypeNorm = NormalizeReturnTypes(new List<string> { returnType }),
@@ -111,6 +148,7 @@ namespace MarkupServer
 		private int ParseGqlFile(string gqlFile, List<TreeNode> roots, List<MethodAnchor> gqlAnchors)
 		{
 			var gqlAnchorsCnt = 0;
+			gqlFile = Path.GetFullPath(gqlFile);
 			var txt = File.ReadAllText(gqlFile);
 			Node root;
 			using (Tracing.Tracer.BuildSpan("ParseGql").StartActive())
@@ -121,6 +159,7 @@ namespace MarkupServer
 			{
 				var group = new TreeNode
 				{
+					Id = MakeGroupId("gqlType", gqlFile, funcsPerType.Key),
 					Name = funcsPerType.Key,
 					NodeType = "group",
 				};
@@ -143,6 +182,7 @@ namespace MarkupServer
 					gqlAnchorsCnt++;
 					var subgroup = new TreeNode
 					{
+						Id = MakeGroupId("gqlFunc", gqlFile, funcsPerType.Key, treeNode.Name),
 						Name = treeNode.Name,
 						NodeType = "group",
 					};
@@ -236,8 +276,15 @@ namespace MarkupServer
 
 		private IEnumerable<string> GetAllFiles(string folder, string ext)
 		{
-			return Directory.EnumerateFiles(folder, $"*.{ext}", SearchOption.AllDirectories).
-				Where(x => !x.Contains(@"\vendor\"));
+			folder = Path.GetFullPath(folder);
+			return Directory.EnumerateFiles(folder, $"*.{ext}", SearchOption.AllDirectories)
+				.Select(Path.GetFullPath)
+				.Where(x =>
+				{
+					var norm = x.Replace('\\', '/').ToLowerInvariant();
+					// базовые исключения, чтобы не парсить зависимости
+					return !norm.Contains("/vendor/") && !norm.Contains("/node_modules/") && !norm.Contains("/dist/");
+				});
 		}
 
 	}

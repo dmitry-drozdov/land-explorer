@@ -22,10 +22,23 @@ namespace MarkupServer
 			{
 				Debug($"[init] protocolVersion={p.protocolVersion} p.graphqlParserPath={p.graphqlParserPath}, p.typescriptPath={p.typescriptParserPath}");
 
+				// Поддерживаем два режима:
+				// 1) Плагин прислал явные пути к *.land грамматикам
+				// 2) Плагин не прислал пути (старый протокол) — берём файлы рядом с сервером (graphql.land / ts_resolvers.land)
+				var gqlGrammarPath = p.graphqlParserPath;
+				var tsGrammarPath = p.typescriptParserPath;
+				if (string.IsNullOrWhiteSpace(gqlGrammarPath))
+					gqlGrammarPath = Path.Combine(AppContext.BaseDirectory, "graphql.land");
+				if (string.IsNullOrWhiteSpace(tsGrammarPath))
+					tsGrammarPath = Path.Combine(AppContext.BaseDirectory, "ts_resolvers.land");
+
+				gqlGrammarPath = Path.GetFullPath(gqlGrammarPath);
+				tsGrammarPath = Path.GetFullPath(tsGrammarPath);
+
 				var messages = new List<Message>();
 				graphqlParser = Builder.BuildParser(
 				    GrammarType.LR,
-				    File.ReadAllText(p.graphqlParserPath),
+				    File.ReadAllText(gqlGrammarPath),
 				    messages
 				);
 				if (messages.Any(m => m.Type == MessageType.Error))
@@ -41,7 +54,7 @@ namespace MarkupServer
 				messages = new List<Message>();
 				typescriptParser = Builder.BuildParser(
 				    GrammarType.LR,
-				    File.ReadAllText(p.typescriptParserPath),
+				    File.ReadAllText(tsGrammarPath),
 				    messages
 				);
 				if (messages.Any(m => m.Type == MessageType.Error))

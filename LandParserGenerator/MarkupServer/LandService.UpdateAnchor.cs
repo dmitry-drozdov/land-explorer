@@ -1,73 +1,148 @@
-﻿using OpenTracing.Util;
-using StreamJsonRpc;
+﻿using StreamJsonRpc;
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
 using VPTree;
+using Land.Core.Parsing.Tree;
 
 namespace MarkupServer
 {
 	public partial class LandService
 	{
+		private void BuildCurrentGqlTreeFromDisk()
+		{
+			if (string.IsNullOrWhiteSpace(currentFolderPath))
+				throw new InvalidOperationException("currentFolderPath is empty. Call land/listAnchors first.");
+
+			currentGqlAnchors.Clear();
+			currentGqlNodes.Clear();
+
+			Tracing.Init();
+
+			var gqlFiles = GetAllFiles(currentFolderPath, "graphql");
+			using (Tracing.Tracer.BuildSpan("RebuildGqlIndex").StartActive())
+			{
+				foreach (var gqlFile in gqlFiles)
+				{
+					var txt = File.ReadAllText(gqlFile);
+					Node root;
+					using (Tracing.Tracer.BuildSpan("ParseGql").StartActive())
+						root = graphqlParser.Parse(txt).Item1;
+
+					var funcs = GetFuncs(root);
+					foreach (var funcsPerType in funcs)
+					{
+						foreach (var func in funcsPerType.Value)
+						{
+							var treeNode = GetTreeNodeFromGqlNode(func, gqlFile);
+							currentGqlNodes.Add(treeNode);
+
+							currentGqlAnchors.Add(new MethodAnchor
+							{
+								Id = treeNode.Id,
+								ParentNameNorm = treeNode.ParentNameNorm,
+								MethodNameNorm = treeNode.MethodNameNorm,
+								ReturnTypeNorm = treeNode.ReturnTypeNorm,
+								StartOffset = treeNode.StartOffset ?? 0,
+								EndOffset = treeNode.EndOffset ?? 0,
+								Args = (treeNode.Args ?? new List<Arg>())
+									.Select(x => new MethodAnchor.Arg { TypeNorm = x.TypeNorm, NameNorm = x.NameNorm })
+									.ToList(),
+							});
+						}
+					}
+				}
+			}
+
+			using (Tracing.Tracer.BuildSpan("RebuildGqlVPTree").StartActive())
+				currentTree = new VPTree<MethodAnchor>(
+					currentGqlAnchors,
+					(a, b) => Dist.AnchorDistance(a, b, currentWeights),
+					42,
+					Tracing.Tracer
+				);
+		}
+
 		[JsonRpcMethod("land/updateAnchor", UseSingleObjectParameterDeserialization = true)]
 		public Task<UpdateAnchorResult> UpdateAnchorAsync(UpdateAnchorParams p)
 		{
-			if (!nodesById.ContainsKey(p.anchorId))
+			if (p == null || string.IsNullOrWhiteSpace(p.anchorId))
+				throw new ArgumentException("anchorId is required");
+
+			// anchorId — это ID "сущности якоря", которое пришло из последнего listAnchors.
+			// Оно НЕ обязано соответствовать каким-то id в новом коде. Поэтому:
+			// 1) по anchorId берём признаки СТАРОГО якоря из кэша nodesById
+			// 2) строим VP-дерево по НОВОМУ коду
+			// 3) ищем ближайший узел и возвращаем updatedNode с тем же anchorId
+
+			if (!nodesById.TryGetValue(p.anchorId, out var oldNode) || oldNode == null)
 			{
-				Debug($"not found anchor by id [{p.anchorId}]");
+				Debug($"not found anchor by id [{p.anchorId}] (cache lost). Please run land/listAnchors again.");
 				return Task.FromResult(new UpdateAnchorResult { });
 			}
-			var node = nodesById[p.anchorId];
 
-
-			var roots = new List<TreeNode> { };
-			Tracing.Init();
-
-			IEnumerable<string> gqlFiles = GetAllFiles("e:\\phd\\ts\\test", "graphql");
-			List<MethodAnchor> gqlAnchors = new List<MethodAnchor>();
-
-			var gqlAnchorsCnt = 0;
-			using (var scope = Tracing.Tracer.BuildSpan("ProcessGqlFiles").StartActive())
-				foreach (var gqlFile in gqlFiles)
-				{
-					gqlAnchorsCnt += ParseGqlFile(gqlFile, roots, gqlAnchors);
-				}
-
-
-			var _w = new Dist.Weights();
-			VPTree<MethodAnchor> _tree;
-			using (var scope = Tracing.Tracer.BuildSpan("BuildTree").StartActive())
-				_tree = new VPTree<MethodAnchor>(gqlAnchors, (a, b) => Dist.AnchorDistance(a, b, _w), 42, Tracing.Tracer);
-
-			var cands = _tree.KNearest(new MethodAnchor
+			// Защита: updateAnchor предназначен для перепривязки GraphQL-якорей.
+			// Если вызвать его на TS-якоре, он заменит его на GraphQL-узел, что в UI будет выглядеть как поломка.
+			if (!string.Equals(oldNode.Name, "graphql", StringComparison.OrdinalIgnoreCase))
 			{
-				Id = node.Id,
-				ParentNameNorm = node.ParentNameNorm,
-				ReturnTypeNorm = node.ReturnTypeNorm,
-				MethodNameNorm = node.MethodNameNorm,
-				Args = node.Args.Select(x => new MethodAnchor.Arg { TypeNorm = x.TypeNorm, NameNorm = x.NameNorm }).ToList(),
-			}, 1);
+				Debug($"[updateAnchor] anchor [{p.anchorId}] has Name='{oldNode.Name}', expected 'graphql'. Skipping.");
+				return Task.FromResult(new UpdateAnchorResult { });
+			}
 
-			Debug($"{cands[0].Dist}");
-
-			var res = gqlAnchors[cands[0].Index];
-
-			return Task.FromResult(new UpdateAnchorResult
+			try
 			{
-				updatedNode = new TreeNode
-				{
-					Id = p.anchorId,
-					ParentNameNorm = res.ParentNameNorm,
-					ReturnTypeNorm = res.ReturnTypeNorm,
-					MethodNameNorm = res.MethodNameNorm,
-					Name = res.MethodNameNorm,
-					NodeType = "anchor",
-					StartOffset = res.StartOffset,
-					EndOffset = res.EndOffset,
-				},
-			});
+				BuildCurrentGqlTreeFromDisk();
+			}
+			catch (Exception ex)
+			{
+				Debug($"[updateAnchor] cannot rebuild gql tree: {ex.Message}");
+				return Task.FromResult(new UpdateAnchorResult { });
+			}
+
+			if (currentTree == null || currentGqlAnchors.Count == 0)
+				return Task.FromResult(new UpdateAnchorResult { });
+
+			var query = new MethodAnchor
+			{
+				Id = oldNode.Id,
+				ParentNameNorm = oldNode.ParentNameNorm,
+				ReturnTypeNorm = oldNode.ReturnTypeNorm,
+				MethodNameNorm = oldNode.MethodNameNorm,
+				Args = (oldNode.Args ?? new List<Arg>())
+					.Select(x => new MethodAnchor.Arg { TypeNorm = x.TypeNorm, NameNorm = x.NameNorm })
+					.ToList(),
+			};
+
+			var cands = currentTree.KNearest(query, 1);
+			if (cands == null || cands.Count == 0)
+				return Task.FromResult(new UpdateAnchorResult { });
+
+			var best = cands[0];
+			var newNode = currentGqlNodes[best.Index];
+
+			Debug($"[updateAnchor] dist={best.Dist} -> {newNode?.Filepath}:{newNode?.StartOffset}-{newNode?.EndOffset} {newNode?.ParentNameNorm}.{newNode?.MethodNameNorm}");
+
+			// Важно: сохраняем anchorId (сущность), но обновляем позицию/признаки на новые.
+			var updated = new TreeNode
+			{
+				Id = p.anchorId,
+				Name = oldNode.Name,           // оставляем прежний лейбл (например, "graphql")
+				NodeType = "anchor",
+				Filepath = newNode.Filepath,
+				StartOffset = newNode.StartOffset,
+				EndOffset = newNode.EndOffset,
+				ParentNameNorm = newNode.ParentNameNorm,
+				MethodNameNorm = newNode.MethodNameNorm,
+				ReturnTypeNorm = newNode.ReturnTypeNorm,
+				Args = newNode.Args,
+			};
+
+			// Обновляем кэш: теперь дальнейшие updateAnchor будут отталкиваться от новой версии.
+			nodesById[p.anchorId] = updated;
+
+			return Task.FromResult(new UpdateAnchorResult { updatedNode = updated });
 		}
 	}
 }

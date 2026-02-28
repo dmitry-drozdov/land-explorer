@@ -53,10 +53,16 @@ namespace MarkupServer
 
 				Console.Error.WriteLine($"{node.Children[0]} {node.Children[0].Children[0]}");
 
+				// Режим транспорта:
+				//  - по умолчанию TCP (как было раньше)
+				//  - если передали --stdio, работаем по stdin/stdout
+				var useStdio = args.Any(a => a == "--stdio");
+				var useTcp = !useStdio; // дефолт
+
 				// TCP-режим
-				if (args.Length >= 2 && args[0] == "--tcp" || true)
+				if (useTcp)
 				{
-					var ep = ParseEndPoint("127.0.0.1:7711"); // args[1]
+					var ep = args.Length >= 2 && args[0] == "--tcp" ? ParseEndPoint(args[1]) : ParseEndPoint("127.0.0.1:7711");
 					Console.Error.WriteLine($"[boot] TCP mode on {ep}");
 
 					var listener = new TcpListener(ep);

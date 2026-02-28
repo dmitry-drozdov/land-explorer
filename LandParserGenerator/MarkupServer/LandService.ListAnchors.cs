@@ -15,25 +15,35 @@ namespace MarkupServer
 		[JsonRpcMethod("land/listAnchors", UseSingleObjectParameterDeserialization = true)]
 		public Task<ListTreeResult> ListAnchorsAsync(ListTreeParams p)
 		{
+			if (p == null || string.IsNullOrWhiteSpace(p.folderPath))
+				throw new ArgumentException("folderPath is required");
+
+			currentFolderPath = Path.GetFullPath(p.folderPath);
+
+			// Сбрасываем состояние (важно при работе с несколькими файлами и при повторном reload()).
+			nodesById.Clear();
+			currentGqlAnchors.Clear();
+			currentTree = null;
+
 			var roots = new List<TreeNode> { };
 			Tracing.Init();
 
 
-			IEnumerable<string> gqlFiles = GetAllFiles(p.folderPath, "graphql");
-			List<MethodAnchor> gqlAnchors = new List<MethodAnchor>();
+			IEnumerable<string> gqlFiles = GetAllFiles(currentFolderPath, "graphql");
 
 			var gqlAnchorsCnt = 0;
 			using (var scope = Tracing.Tracer.BuildSpan("ProcessGqlFiles").StartActive())
 				foreach (var gqlFile in gqlFiles)
 				{
-					gqlAnchorsCnt += ParseGqlFile(gqlFile, roots, gqlAnchors);
+					gqlAnchorsCnt += ParseGqlFile(gqlFile, roots, currentGqlAnchors);
 				}
 
 
-			var _w = new Dist.Weights();
 			VPTree<MethodAnchor> _tree;
 			using (var scope = Tracing.Tracer.BuildSpan("BuildTreeListAnchors").StartActive())
-				_tree = new VPTree<MethodAnchor>(gqlAnchors, (a, b) => Dist.AnchorDistance(a, b, _w), 42, Tracing.Tracer);
+				_tree = new VPTree<MethodAnchor>(currentGqlAnchors, (a, b) => Dist.AnchorDistance(a, b, currentWeights), 42, Tracing.Tracer);
+
+			currentTree = _tree;
 
 
 			/*using (var scope = Tracing.Tracer.BuildSpan("SaveTree").StartActive())
@@ -53,7 +63,7 @@ namespace MarkupServer
 
 				}*/
 
-			IEnumerable<string> tsFiles = GetAllFiles(p.folderPath, "ts");
+			IEnumerable<string> tsFiles = GetAllFiles(currentFolderPath, "ts");
 
 			var tsAnchors = 0;
 			using (var scope = Tracing.Tracer.BuildSpan("ProcessTsFiles").StartActive())

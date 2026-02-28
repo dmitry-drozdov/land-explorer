@@ -17,7 +17,17 @@ namespace MarkupServer
 	{
 		private BaseParser graphqlParser;
 		private BaseParser typescriptParser;
+		// Все узлы, которые мы отдали в дерево (anchor'ы нужны для updateAnchor).
+		// ВАЖНО: ключ должен быть глобально уникальным на весь folder (иначе коллизии при нескольких файлах).
 		private Dictionary<string, TreeNode> nodesById = [];
+
+		// Кэш последнего построенного дерева для папки (чтобы updateAnchor работал на весь folder,
+		// и не было жёстко зашитых путей).
+		private string currentFolderPath;
+		private List<MethodAnchor> currentGqlAnchors = new();
+		private List<TreeNode> currentGqlNodes = new();
+		private VPTree<MethodAnchor> currentTree;
+		private Dist.Weights currentWeights = new();
 
 		[JsonRpcMethod("shutdown")]
 		public Task ShutdownAsync() => Task.CompletedTask;
