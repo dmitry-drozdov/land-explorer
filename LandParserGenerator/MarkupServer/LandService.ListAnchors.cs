@@ -36,8 +36,26 @@ namespace MarkupServer
 								nodesById[n.Id] = n;
 					}
 
-					Debug($"[listAnchors] loaded persisted markup from {AnchorStore.GetStorePath(currentFolderPath)} (anchors={nodesById.Count})");
-					return Task.FromResult(new ListTreeResult { Roots = currentMarkup.Roots, FromCache = true });
+					
+					// Миграция старого формата: раньше для gql-якорей Name был "graphql" (а реальное имя лежало в MethodNameNorm).
+					// Теперь Name = отображаемое имя якоря (MethodName).
+					bool migrated = false;
+					foreach (var n in AnchorStore.EnumerateNodes(currentMarkup.Roots))
+					{
+						if (n?.NodeType == "anchor" && (string.Equals(n.Name, "graphql", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(n.Name)))
+						{
+							n.Name = n.MethodNameNorm ?? n.Name;
+							migrated = true;
+						}
+					}
+					if (migrated)
+					{
+						if (!AnchorStore.TrySave(currentFolderPath, currentMarkup, out var migErr))
+							Debug($"[listAnchors] cache migration save failed: {migErr}");
+					}
+
+Debug($"[listAnchors] loaded persisted markup from {AnchorStore.GetStorePath(currentFolderPath)} (anchors={nodesById.Count})");
+					return Task.FromResult(new ListTreeResult { Roots = ToClientRoots(currentMarkup.Roots), FromCache = true });
 				}
 				if (!string.IsNullOrWhiteSpace(err))
 					Debug($"[listAnchors] cache load failed: {err}");
@@ -118,7 +136,8 @@ namespace MarkupServer
 					Debug($"[listAnchors] saved persisted markup to {AnchorStore.GetStorePath(currentFolderPath)}");
 			}
 
-			return Task.FromResult(new ListTreeResult { Roots = roots, FromCache = false });
+			// FromCache=false опускаем (null), чтобы уменьшить JSON.
+			return Task.FromResult(new ListTreeResult { Roots = ToClientRoots(roots), FromCache = null });
 		}
 	}
 }

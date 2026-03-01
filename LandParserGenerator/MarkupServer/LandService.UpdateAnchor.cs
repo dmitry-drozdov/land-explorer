@@ -82,16 +82,15 @@ namespace MarkupServer
 				Debug($"not found anchor by id [{p.anchorId}] (cache lost). Please run land/listAnchors again.");
 				return Task.FromResult(new UpdateAnchorResult { });
 			}
-
 			// Защита: updateAnchor предназначен для перепривязки GraphQL-якорей.
-			// Если вызвать его на TS-якоре, он заменит его на GraphQL-узел, что в UI будет выглядеть как поломка.
-			if (!string.Equals(oldNode.Name, "graphql", StringComparison.OrdinalIgnoreCase))
+			// Проверяем по префиксу ID, т.к. Name теперь используется как отображаемое имя (MethodName).
+			if (!(oldNode.Id ?? "").StartsWith("gql:", StringComparison.OrdinalIgnoreCase))
 			{
-				Debug($"[updateAnchor] anchor [{p.anchorId}] has Name='{oldNode.Name}', expected 'graphql'. Skipping.");
+				Debug($"[updateAnchor] anchor [{p.anchorId}] has Id='{oldNode.Id}', expected prefix 'gql:'. Skipping.");
 				return Task.FromResult(new UpdateAnchorResult { });
 			}
 
-			try
+try
 			{
 				BuildCurrentGqlTreeFromDisk();
 			}
@@ -128,7 +127,7 @@ namespace MarkupServer
 			var updated = new TreeNode
 			{
 				Id = p.anchorId,
-				Name = oldNode.Name,           // оставляем прежний лейбл (например, "graphql")
+				Name = newNode.Name,           // отображаемое имя якоря = MethodName из нового кода
 				NodeType = "anchor",
 				Filepath = newNode.Filepath,
 				StartOffset = newNode.StartOffset,
@@ -160,7 +159,7 @@ namespace MarkupServer
 				Debug($"[updateAnchor] cache persist failed: {ex.Message}");
 			}
 
-			return Task.FromResult(new UpdateAnchorResult { updatedNode = updated });
+			return Task.FromResult(new UpdateAnchorResult { updatedNode = ToClientNode(updated) });
 		}
 	}
 }

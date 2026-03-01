@@ -43,7 +43,7 @@ namespace MarkupServer
 		private TreeNode GetTreeNodeFromTsNode(Node n, string filepath, string parentName)
 		{
 			filepath = Path.GetFullPath(filepath);
-			var name = n.Children[0].ToString().Replace("ID: ", "").ToLower();
+			var name = n.Children[0].ToString().Replace("ID: ", "");
 			var args = n.Children[1].Children.Select(x => new Tuple<string, string>(
 				x.ToString().Replace("arg", ""),
 				"")).
@@ -178,17 +178,8 @@ namespace MarkupServer
 						EndOffset = treeNode.EndOffset ?? 0,
 						Args = treeNode.Args.Select(x => new MethodAnchor.Arg { TypeNorm = x.TypeNorm, NameNorm = x.NameNorm }).ToList(),
 					});
-
 					gqlAnchorsCnt++;
-					var subgroup = new TreeNode
-					{
-						Id = MakeGroupId("gqlFunc", gqlFile, funcsPerType.Key, treeNode.Name),
-						Name = treeNode.Name,
-						NodeType = "group",
-					};
-					treeNode.Name = "graphql";
-					subgroup.Children.Add(treeNode);
-					group.Children.Add(subgroup);
+					group.Children.Add(treeNode);
 				}
 
 				roots.Add(group);

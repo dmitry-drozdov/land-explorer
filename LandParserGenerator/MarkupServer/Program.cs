@@ -11,6 +11,7 @@ using System.Net;
 using Land.Core.Parsing;
 using Land.Core.Parsing.Tree;
 using Jaeger;
+using Newtonsoft.Json;
 using VPTree;
 
 
@@ -84,7 +85,7 @@ namespace MarkupServer
 							using (var stream = client.GetStream())
 							{
 								var svc = new LandService();
-								var rpc = JsonRpc.Attach(stream, stream, svc); // уже начинает слушать
+								var rpc = AttachRpc(stream, stream, svc);
 
 								Console.Error.WriteLine("[boot] client connected");
 
@@ -125,7 +126,7 @@ namespace MarkupServer
 					using var input = Console.OpenStandardInput();
 					using var output = Console.OpenStandardOutput();
 					var svc = new LandService();
-					var rpc = JsonRpc.Attach(output, input, svc);
+					var rpc = AttachRpc(output, input, svc);
 
 					try
 					{
@@ -164,6 +165,24 @@ namespace MarkupServer
 			var port = int.Parse(parts[1]);
 			var ip = host == "localhost" ? IPAddress.Loopback : IPAddress.Parse(host);
 			return new IPEndPoint(ip, port);
+		}
+
+		/// <summary>
+		/// Создаём JSON-RPC с настройками сериализации.
+		///
+		/// Важно для оптимизации payload:
+		/// NullValueHandling.Ignore => null-поля не попадают в JSON.
+		/// Это особенно полезно для group-нод, где мы специально оставляем Filepath/Offsets = null.
+		/// </summary>
+		private static JsonRpc AttachRpc(Stream sendingStream, Stream receivingStream, object target)
+		{
+			var formatter = new JsonMessageFormatter();
+			formatter.JsonSerializer.NullValueHandling = NullValueHandling.Ignore;
+			// Не трогаем NamingStrategy: в протоколе исторически PascalCase.
+			var handler = new HeaderDelimitedMessageHandler(sendingStream, receivingStream, formatter);
+			var rpc = new JsonRpc(handler, target);
+			rpc.StartListening();
+			return rpc;
 		}
 	}
 

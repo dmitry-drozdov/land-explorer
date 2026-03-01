@@ -34,6 +34,34 @@ namespace MarkupServer
 		private VPTree<MethodAnchor> currentTree;
 		private Dist.Weights currentWeights = new();
 
+
+		private static TreeNodeClient ToClientNode(TreeNode n)
+		{
+			if (n == null) return null;
+			var isAnchor = string.Equals(n.NodeType, "anchor", StringComparison.OrdinalIgnoreCase);
+			var c = new TreeNodeClient
+			{
+				Id = n.Id,
+				Name = n.Name,
+				NodeType = n.NodeType,
+			};
+
+			// Оптимизация трафика: file/offsets нужны только для anchor-нод.
+			if (isAnchor)
+			{
+				c.Filepath = n.Filepath;
+				c.StartOffset = n.StartOffset;
+				c.EndOffset = n.EndOffset;
+			}
+
+			if (n.Children != null && n.Children.Count > 0)
+				c.Children = n.Children.Select(ToClientNode).Where(x => x != null).ToList();
+			return c;
+		}
+
+		private static List<TreeNodeClient> ToClientRoots(List<TreeNode> roots)
+			=> roots?.Select(ToClientNode).Where(x => x != null).ToList() ?? new List<TreeNodeClient>();
+
 		[JsonRpcMethod("shutdown")]
 		public Task ShutdownAsync() => Task.CompletedTask;
 
