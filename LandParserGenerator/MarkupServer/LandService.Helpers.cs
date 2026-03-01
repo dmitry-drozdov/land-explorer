@@ -62,6 +62,7 @@ namespace MarkupServer
 				EndOffset = end,
 				MethodNameNorm = NormalizeName(name),
 				ParentNameNorm = NormalizeName(parentName),
+				ParentNameRaw = parentName,
 				ReturnTypeNorm = NormalizeReturnTypes(new List<string> { "" }),
 				Args = NormalizeArgs(args),
 			};
@@ -95,6 +96,7 @@ namespace MarkupServer
 				EndOffset = end,
 				MethodNameNorm = NormalizeName(name),
 				ParentNameNorm = NormalizeName(typeName),
+				ParentNameRaw = typeName,
 				ReturnTypeNorm = NormalizeReturnTypes(new List<string> { returnType }),
 				Args = NormalizeArgs(args),
 			};

@@ -133,10 +133,17 @@ try
 				StartOffset = newNode.StartOffset,
 				EndOffset = newNode.EndOffset,
 				ParentNameNorm = newNode.ParentNameNorm,
+				ParentNameRaw = newNode.ParentNameRaw,
 				MethodNameNorm = newNode.MethodNameNorm,
 				ReturnTypeNorm = newNode.ReturnTypeNorm,
 				Args = newNode.Args,
 			};
+
+			// Новая группа (GraphQL): определяется по {file + type}.
+			// groupId должен совпадать с тем, что строится в listAnchors (MakeGroupId("gqlType", file, typeName)).
+			var parentType = updated.ParentNameRaw ?? "";
+			var parentGroupId = MakeGroupId("gqlType", updated.Filepath, parentType);
+			var parentGroupName = string.IsNullOrWhiteSpace(parentType) ? (updated.ParentNameNorm ?? "") : parentType;
 
 			// Обновляем кэш: теперь дальнейшие updateAnchor будут отталкиваться от новой версии.
 			nodesById[p.anchorId] = updated;
@@ -148,7 +155,7 @@ try
 				{
 					if (currentMarkup?.Roots != null)
 					{
-						AnchorStore.ReplaceNodeInTree(currentMarkup.Roots, updated);
+						AnchorStore.UpsertAnchorInTree(currentMarkup.Roots, updated, parentGroupId, parentGroupName);
 						if (!AnchorStore.TrySave(currentFolderPath, currentMarkup, out var err))
 							Debug($"[updateAnchor] cannot save anchors cache: {err}");
 					}
@@ -159,7 +166,7 @@ try
 				Debug($"[updateAnchor] cache persist failed: {ex.Message}");
 			}
 
-			return Task.FromResult(MakeUpdateAnchorResult(updated));
+			return Task.FromResult(MakeUpdateAnchorResult(updated, parentGroupId, parentGroupName));
 		}
 	}
 }

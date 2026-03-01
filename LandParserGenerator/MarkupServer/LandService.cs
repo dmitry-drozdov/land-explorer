@@ -67,8 +67,8 @@ namespace MarkupServer
 		private static ListTreeResultV2 MakeListTreeResult(List<TreeNode> roots, bool? fromCache)
 			=> new ListTreeResultV2 { r = ToClientRootsV2(roots), fc = fromCache };
 
-		private static UpdateAnchorResultV2 MakeUpdateAnchorResult(TreeNode updated)
-			=> new UpdateAnchorResultV2 { u = ToClientNodeV2(updated) };
+		private static UpdateAnchorResultV2 MakeUpdateAnchorResult(TreeNode updated, string parentGroupId = null, string parentGroupName = null)
+			=> new UpdateAnchorResultV2 { u = ToClientNodeV2(updated), pg = parentGroupId, pn = parentGroupName };
 
 		[JsonRpcMethod("shutdown")]
 		public Task ShutdownAsync() => Task.CompletedTask;

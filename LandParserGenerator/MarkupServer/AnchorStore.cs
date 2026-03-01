@@ -139,6 +139,86 @@ namespace MarkupServer
 
 			return ReplaceIn(roots);
 		}
+
+		/// <summary>
+		/// Обновляет anchor-узел в дереве и, при необходимости, переносит его между группами.
+		/// Используется в updateAnchor, потому что якорь может "переехать" в другой GraphQL-тип (группу).
+		/// </summary>
+		public static void UpsertAnchorInTree(List<TreeNode> roots, TreeNode updated, string targetGroupId, string targetGroupName)
+		{
+			if (roots == null || updated == null || string.IsNullOrWhiteSpace(updated.Id))
+				return;
+
+			// 1) Удаляем старую версию узла из дерева (если она там есть)
+			TreeNode oldParentGroup = null;
+			bool RemoveIn(List<TreeNode> nodes, TreeNode parentGroup)
+			{
+				for (int i = 0; i < nodes.Count; i++)
+				{
+					var cur = nodes[i];
+					if (cur != null && cur.Id == updated.Id)
+					{
+						oldParentGroup = parentGroup;
+						nodes.RemoveAt(i);
+						return true;
+					}
+
+					if (cur?.Children != null && cur.Children.Count > 0)
+					{
+						var nextParent = string.Equals(cur.NodeType, "group", StringComparison.OrdinalIgnoreCase) ? cur : parentGroup;
+						if (RemoveIn(cur.Children, nextParent))
+							return true;
+					}
+				}
+				return false;
+			}
+
+			RemoveIn(roots, null);
+
+			// 2) Находим/создаём целевую группу. Если groupId не задан — просто пытаемся заменить/добавить как root.
+			if (string.IsNullOrWhiteSpace(targetGroupId))
+			{
+				if (!ReplaceNodeInTree(roots, updated))
+					roots.Add(updated);
+				return;
+			}
+
+			var targetGroup = roots.FirstOrDefault(x => x != null
+				&& string.Equals(x.NodeType, "group", StringComparison.OrdinalIgnoreCase)
+				&& x.Id == targetGroupId);
+
+			if (targetGroup == null)
+			{
+				targetGroup = new TreeNode
+				{
+					Id = targetGroupId,
+					Name = targetGroupName,
+					NodeType = "group",
+					Children = new List<TreeNode>(),
+				};
+				roots.Add(targetGroup);
+			}
+			else
+			{
+				// если группа существует, но Name пустое — заполним
+				if (string.IsNullOrWhiteSpace(targetGroup.Name) && !string.IsNullOrWhiteSpace(targetGroupName))
+					targetGroup.Name = targetGroupName;
+			}
+
+			// 3) Вставляем обновлённый anchor в целевую группу
+			targetGroup.Children ??= new List<TreeNode>();
+			targetGroup.Children.RemoveAll(x => x != null && x.Id == updated.Id);
+			targetGroup.Children.Add(updated);
+
+			// 4) Если старая группа опустела — удаляем её, чтобы дерево не засорялось пустыми группами.
+			if (oldParentGroup != null
+				&& !ReferenceEquals(oldParentGroup, targetGroup)
+				&& string.Equals(oldParentGroup.NodeType, "group", StringComparison.OrdinalIgnoreCase)
+				&& (oldParentGroup.Children == null || oldParentGroup.Children.Count == 0))
+			{
+				roots.RemoveAll(x => x != null && x.Id == oldParentGroup.Id);
+			}
+		}
 	}
 
 	internal sealed class PersistedMarkup

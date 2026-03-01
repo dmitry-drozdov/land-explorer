@@ -25,6 +25,8 @@ namespace MarkupServer
 		// внутренние поля (нужны для updateAnchor / метрик, но не отдаются в плагин)
 		public string MethodNameNorm { get; set; }
 		public string ParentNameNorm { get; set; }
+		// raw-значение родителя (например имя GraphQL-типа). Нужен для правильной группировки.
+		public string ParentNameRaw { get; set; }
 		public string ReturnTypeNorm { get; set; }
 		public List<Arg> Args { get; set; }
 	}
@@ -68,6 +70,9 @@ namespace MarkupServer
 	public class UpdateAnchorResultV2
 	{
 		public TreeNodeClientV2 u { get; set; }
+		// parent group id + name (нужно, чтобы клиент мог переместить узел между группами без полного reload)
+		public string pg { get; set; }
+		public string pn { get; set; }
 	}
 
 
