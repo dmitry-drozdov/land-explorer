@@ -31,26 +31,45 @@ namespace MarkupServer
 
 	/// <summary>
 	/// DTO, который уходит в плагин.
-	///
-	/// Оптимизация трафика:
-	/// - для group-нод поля Filepath/StartOffset/EndOffset оставляем null,
-	/// - для anchor-нод Children обычно null.
-	///
-	/// При включенном NullValueHandling.Ignore эти поля не попадут в JSON.
+	/// (теперь всегда используется протокол v2 с компактными именами полей).
 	/// </summary>
-	public class TreeNodeClient
+	/// 
+	/// <summary>
+	/// DTO для протокола v2 (компактные имена полей).
+	/// id/n/t/c/f/s/e соответствуют:
+	/// - id: Id
+	/// - n : Name
+	/// - t : NodeType
+	/// - c : Children
+	/// - f : Filepath
+	/// - s : StartOffset
+	/// - e : EndOffset
+	/// </summary>
+	public class TreeNodeClientV2
 	{
-		public string Id { get; set; }
-		public string Name { get; set; }
+		public string id { get; set; }
+		public string n { get; set; }
 		/// <summary>"group" | "anchor"</summary>
-		public string NodeType { get; set; }
+		public string t { get; set; }
 
-		public List<TreeNodeClient> Children { get; set; }
+		public List<TreeNodeClientV2> c { get; set; }
 
-		public string Filepath { get; set; }
-		public int? StartOffset { get; set; }
-		public int? EndOffset { get; set; }
+		public string f { get; set; }
+		public int? s { get; set; }
+		public int? e { get; set; }
 	}
+
+	public class ListTreeResultV2
+	{
+		public List<TreeNodeClientV2> r { get; set; }
+		public bool? fc { get; set; }
+	}
+
+	public class UpdateAnchorResultV2
+	{
+		public TreeNodeClientV2 u { get; set; }
+	}
+
 
 	public class ListTreeParams
 	{
@@ -61,16 +80,5 @@ namespace MarkupServer
 		public bool forceRescan { get; set; } = false;
 	}
 
-	public class ListTreeResult
-	{
-		public List<TreeNodeClient> Roots { get; set; }
-		/// <summary>
-		/// True если дерево вернули из кэша. Если false — поле может быть null,
-		/// чтобы не засорять JSON (при включенном NullValueHandling.Ignore).
-		/// </summary>
-		public bool? FromCache { get; set; }
-	}
-
 	public class UpdateAnchorParams { public string anchorId { get; set; } }
-	public class UpdateAnchorResult { public TreeNodeClient updatedNode { get; set; } }
 }

@@ -20,7 +20,9 @@ namespace MarkupServer
 		{
 			try
 			{
-				Debug($"[init] protocolVersion={p.protocolVersion} p.graphqlParserPath={p.graphqlParserPath}, p.typescriptPath={p.typescriptParserPath}");
+				// Начиная с этого релиза сервер использует только компактный протокол v2.
+				// Клиент может присылать protocolVersion, но мы его игнорируем и всегда отвечаем v2.
+				Debug($"[init] clientProtocolVersion={p?.protocolVersion} (serverProtocolVersion=2) gqlPath={p?.graphqlParserPath}, tsPath={p?.typescriptParserPath}");
 
 				// Поддерживаем два режима:
 				// 1) Плагин прислал явные пути к *.land грамматикам
@@ -69,7 +71,7 @@ namespace MarkupServer
 				return Task.FromResult(new InitializeResult
 				{
 					serverVersion = "1.0.0",
-					protocolVersion = 1,
+					protocolVersion = 2,
 					capabilities = new Capabilities { pushUpdates = false }
 				});
 			}
@@ -79,7 +81,7 @@ namespace MarkupServer
 				return Task.FromResult(new InitializeResult
 				{
 					serverVersion = "1.0.0",
-					protocolVersion = 1,
+					protocolVersion = 2,
 					capabilities = new Capabilities { pushUpdates = false }
 				});
 			}

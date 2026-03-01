@@ -13,7 +13,7 @@ namespace MarkupServer
 	public partial class LandService
 	{
 		[JsonRpcMethod("land/listAnchors", UseSingleObjectParameterDeserialization = true)]
-		public Task<ListTreeResult> ListAnchorsAsync(ListTreeParams p)
+		public Task<ListTreeResultV2> ListAnchorsAsync(ListTreeParams p)
 		{
 			if (p == null || string.IsNullOrWhiteSpace(p.folderPath))
 				throw new ArgumentException("folderPath is required");
@@ -37,25 +37,9 @@ namespace MarkupServer
 					}
 
 					
-					// Миграция старого формата: раньше для gql-якорей Name был "graphql" (а реальное имя лежало в MethodNameNorm).
-					// Теперь Name = отображаемое имя якоря (MethodName).
-					bool migrated = false;
-					foreach (var n in AnchorStore.EnumerateNodes(currentMarkup.Roots))
-					{
-						if (n?.NodeType == "anchor" && (string.Equals(n.Name, "graphql", StringComparison.OrdinalIgnoreCase) || string.IsNullOrWhiteSpace(n.Name)))
-						{
-							n.Name = n.MethodNameNorm ?? n.Name;
-							migrated = true;
-						}
-					}
-					if (migrated)
-					{
-						if (!AnchorStore.TrySave(currentFolderPath, currentMarkup, out var migErr))
-							Debug($"[listAnchors] cache migration save failed: {migErr}");
-					}
-
-Debug($"[listAnchors] loaded persisted markup from {AnchorStore.GetStorePath(currentFolderPath)} (anchors={nodesById.Count})");
-					return Task.FromResult(new ListTreeResult { Roots = ToClientRoots(currentMarkup.Roots), FromCache = true });
+					
+					Debug($"[listAnchors] loaded persisted markup from {AnchorStore.GetStorePath(currentFolderPath)} (anchors={nodesById.Count})");
+					return Task.FromResult(MakeListTreeResult(currentMarkup.Roots, true));
 				}
 				if (!string.IsNullOrWhiteSpace(err))
 					Debug($"[listAnchors] cache load failed: {err}");
@@ -137,7 +121,7 @@ Debug($"[listAnchors] loaded persisted markup from {AnchorStore.GetStorePath(cur
 			}
 
 			// FromCache=false опускаем (null), чтобы уменьшить JSON.
-			return Task.FromResult(new ListTreeResult { Roots = ToClientRoots(roots), FromCache = null });
+			return Task.FromResult(MakeListTreeResult(roots, null));
 		}
 	}
 }

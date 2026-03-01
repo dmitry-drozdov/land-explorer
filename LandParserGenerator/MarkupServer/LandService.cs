@@ -35,32 +35,40 @@ namespace MarkupServer
 		private Dist.Weights currentWeights = new();
 
 
-		private static TreeNodeClient ToClientNode(TreeNode n)
+		private static TreeNodeClientV2 ToClientNodeV2(TreeNode n)
 		{
 			if (n == null) return null;
 			var isAnchor = string.Equals(n.NodeType, "anchor", StringComparison.OrdinalIgnoreCase);
-			var c = new TreeNodeClient
+
+			var c = new TreeNodeClientV2
 			{
-				Id = n.Id,
-				Name = n.Name,
-				NodeType = n.NodeType,
+				id = n.Id,
+				n = n.Name,
+				t = n.NodeType,
 			};
 
 			// Оптимизация трафика: file/offsets нужны только для anchor-нод.
 			if (isAnchor)
 			{
-				c.Filepath = n.Filepath;
-				c.StartOffset = n.StartOffset;
-				c.EndOffset = n.EndOffset;
+				c.f = n.Filepath;
+				c.s = n.StartOffset;
+				c.e = n.EndOffset;
 			}
 
 			if (n.Children != null && n.Children.Count > 0)
-				c.Children = n.Children.Select(ToClientNode).Where(x => x != null).ToList();
+				c.c = n.Children.Select(ToClientNodeV2).Where(x => x != null).ToList();
+
 			return c;
 		}
 
-		private static List<TreeNodeClient> ToClientRoots(List<TreeNode> roots)
-			=> roots?.Select(ToClientNode).Where(x => x != null).ToList() ?? new List<TreeNodeClient>();
+		private static List<TreeNodeClientV2> ToClientRootsV2(List<TreeNode> roots)
+			=> roots?.Select(ToClientNodeV2).Where(x => x != null).ToList() ?? new List<TreeNodeClientV2>();
+
+		private static ListTreeResultV2 MakeListTreeResult(List<TreeNode> roots, bool? fromCache)
+			=> new ListTreeResultV2 { r = ToClientRootsV2(roots), fc = fromCache };
+
+		private static UpdateAnchorResultV2 MakeUpdateAnchorResult(TreeNode updated)
+			=> new UpdateAnchorResultV2 { u = ToClientNodeV2(updated) };
 
 		[JsonRpcMethod("shutdown")]
 		public Task ShutdownAsync() => Task.CompletedTask;

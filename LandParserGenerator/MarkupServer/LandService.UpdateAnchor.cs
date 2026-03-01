@@ -66,7 +66,7 @@ namespace MarkupServer
 		}
 
 		[JsonRpcMethod("land/updateAnchor", UseSingleObjectParameterDeserialization = true)]
-		public Task<UpdateAnchorResult> UpdateAnchorAsync(UpdateAnchorParams p)
+		public Task<UpdateAnchorResultV2> UpdateAnchorAsync(UpdateAnchorParams p)
 		{
 			if (p == null || string.IsNullOrWhiteSpace(p.anchorId))
 				throw new ArgumentException("anchorId is required");
@@ -80,14 +80,14 @@ namespace MarkupServer
 			if (!nodesById.TryGetValue(p.anchorId, out var oldNode) || oldNode == null)
 			{
 				Debug($"not found anchor by id [{p.anchorId}] (cache lost). Please run land/listAnchors again.");
-				return Task.FromResult(new UpdateAnchorResult { });
+				return Task.FromResult(MakeUpdateAnchorResult(null));
 			}
 			// Защита: updateAnchor предназначен для перепривязки GraphQL-якорей.
 			// Проверяем по префиксу ID, т.к. Name теперь используется как отображаемое имя (MethodName).
 			if (!(oldNode.Id ?? "").StartsWith("gql:", StringComparison.OrdinalIgnoreCase))
 			{
 				Debug($"[updateAnchor] anchor [{p.anchorId}] has Id='{oldNode.Id}', expected prefix 'gql:'. Skipping.");
-				return Task.FromResult(new UpdateAnchorResult { });
+				return Task.FromResult(MakeUpdateAnchorResult(null));
 			}
 
 try
@@ -97,11 +97,11 @@ try
 			catch (Exception ex)
 			{
 				Debug($"[updateAnchor] cannot rebuild gql tree: {ex.Message}");
-				return Task.FromResult(new UpdateAnchorResult { });
+				return Task.FromResult(MakeUpdateAnchorResult(null));
 			}
 
 			if (currentTree == null || currentGqlAnchors.Count == 0)
-				return Task.FromResult(new UpdateAnchorResult { });
+				return Task.FromResult(MakeUpdateAnchorResult(null));
 
 			var query = new MethodAnchor
 			{
@@ -116,7 +116,7 @@ try
 
 			var cands = currentTree.KNearest(query, 1);
 			if (cands == null || cands.Count == 0)
-				return Task.FromResult(new UpdateAnchorResult { });
+				return Task.FromResult(MakeUpdateAnchorResult(null));
 
 			var best = cands[0];
 			var newNode = currentGqlNodes[best.Index];
@@ -159,7 +159,7 @@ try
 				Debug($"[updateAnchor] cache persist failed: {ex.Message}");
 			}
 
-			return Task.FromResult(new UpdateAnchorResult { updatedNode = ToClientNode(updated) });
+			return Task.FromResult(MakeUpdateAnchorResult(updated));
 		}
 	}
 }
