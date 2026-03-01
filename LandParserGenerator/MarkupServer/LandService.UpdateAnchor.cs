@@ -142,6 +142,24 @@ namespace MarkupServer
 			// Обновляем кэш: теперь дальнейшие updateAnchor будут отталкиваться от новой версии.
 			nodesById[p.anchorId] = updated;
 
+			// И обновляем персистентный snapshot на диске (если он загружен/создан).
+			try
+			{
+				lock (markupLock)
+				{
+					if (currentMarkup?.Roots != null)
+					{
+						AnchorStore.ReplaceNodeInTree(currentMarkup.Roots, updated);
+						if (!AnchorStore.TrySave(currentFolderPath, currentMarkup, out var err))
+							Debug($"[updateAnchor] cannot save anchors cache: {err}");
+					}
+				}
+			}
+			catch (Exception ex)
+			{
+				Debug($"[updateAnchor] cache persist failed: {ex.Message}");
+			}
+
 			return Task.FromResult(new UpdateAnchorResult { updatedNode = updated });
 		}
 	}

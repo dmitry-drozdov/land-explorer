@@ -20,6 +20,29 @@ namespace MarkupServer
 
 			currentFolderPath = Path.GetFullPath(p.folderPath);
 
+			// 1) По умолчанию (preferCache=true) пытаемся отдать сохранённую разметку с диска.
+			// Это убирает полный рескан проекта при каждом запуске плагина.
+			if (p.preferCache && !p.forceRescan)
+			{
+				if (AnchorStore.TryLoad(currentFolderPath, out var cached, out var err) && cached?.Roots != null && cached.Roots.Count > 0)
+				{
+					lock (markupLock)
+					{
+						currentMarkup = cached;
+						// восстановим nodesById (нужно для updateAnchor)
+						nodesById.Clear();
+						foreach (var n in AnchorStore.EnumerateNodes(currentMarkup.Roots))
+							if (n?.NodeType == "anchor" && !string.IsNullOrWhiteSpace(n.Id))
+								nodesById[n.Id] = n;
+					}
+
+					Debug($"[listAnchors] loaded persisted markup from {AnchorStore.GetStorePath(currentFolderPath)} (anchors={nodesById.Count})");
+					return Task.FromResult(new ListTreeResult { Roots = currentMarkup.Roots, FromCache = true });
+				}
+				if (!string.IsNullOrWhiteSpace(err))
+					Debug($"[listAnchors] cache load failed: {err}");
+			}
+
 			// Сбрасываем состояние (важно при работе с несколькими файлами и при повторном reload()).
 			nodesById.Clear();
 			currentGqlAnchors.Clear();
@@ -39,11 +62,8 @@ namespace MarkupServer
 				}
 
 
-			VPTree<MethodAnchor> _tree;
-			using (var scope = Tracing.Tracer.BuildSpan("BuildTreeListAnchors").StartActive())
-				_tree = new VPTree<MethodAnchor>(currentGqlAnchors, (a, b) => Dist.AnchorDistance(a, b, currentWeights), 42, Tracing.Tracer);
-
-			currentTree = _tree;
+			// ВАЖНО: VP-дерево не храним и не сериализуем.
+			// Для updateAnchor дерево перестраивается каждый раз по текущему коду.
 
 
 			/*using (var scope = Tracing.Tracer.BuildSpan("SaveTree").StartActive())
@@ -88,7 +108,17 @@ namespace MarkupServer
 
 			Debug($"gqlAnchors={gqlAnchorsCnt}, tsAnchors={tsAnchors}");
 
-			return Task.FromResult(new ListTreeResult { Roots = roots });
+			// 2) Сохраняем разметку на диск.
+			lock (markupLock)
+			{
+				currentMarkup = new PersistedMarkup { Roots = roots };
+				if (!AnchorStore.TrySave(currentFolderPath, currentMarkup, out var saveErr))
+					Debug($"[listAnchors] cannot save anchors cache: {saveErr}");
+				else
+					Debug($"[listAnchors] saved persisted markup to {AnchorStore.GetStorePath(currentFolderPath)}");
+			}
+
+			return Task.FromResult(new ListTreeResult { Roots = roots, FromCache = false });
 		}
 	}
 }

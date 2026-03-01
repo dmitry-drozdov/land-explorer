@@ -15,6 +15,11 @@ namespace MarkupServer
 {
 	public partial class LandService
 	{
+		// Текущий snapshot разметки (Roots), загруженный/созданный для currentFolderPath.
+		// Нужен, чтобы updateAnchor мог обновлять файл на диске.
+		private PersistedMarkup currentMarkup;
+		private readonly object markupLock = new object();
+
 		private BaseParser graphqlParser;
 		private BaseParser typescriptParser;
 		// Все узлы, которые мы отдали в дерево (anchor'ы нужны для updateAnchor).
