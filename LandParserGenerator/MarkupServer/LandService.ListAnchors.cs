@@ -50,7 +50,8 @@ namespace MarkupServer
 			currentGqlAnchors.Clear();
 			currentTree = null;
 
-			var roots = new List<TreeNode> { };
+			var gqlRoots = new List<TreeNode> { };
+			var tsNodes = new List<TreeNode>();
 			Tracing.Init();
 
 
@@ -60,7 +61,7 @@ namespace MarkupServer
 			using (var scope = Tracing.Tracer.BuildSpan("ProcessGqlFiles").StartActive())
 				foreach (var gqlFile in gqlFiles)
 				{
-					gqlAnchorsCnt += ParseGqlFile(gqlFile, roots, currentGqlAnchors);
+					gqlAnchorsCnt += ParseGqlFile(gqlFile, gqlRoots, currentGqlAnchors);
 				}
 
 
@@ -101,7 +102,7 @@ namespace MarkupServer
 							var treeNode = GetTreeNodeFromTsNode(node, tsFile, nodes.Key);
 							nodesById[treeNode.Id] = treeNode;
 							tsAnchors++;
-							roots.Add(treeNode);
+							tsNodes.Add(treeNode);
 						}
 					}
 				}
@@ -109,6 +110,9 @@ namespace MarkupServer
 			//AnchorsIO.SaveJson(@"e:\phd\anchors.json", gqlAnchors);
 
 			Debug($"gqlAnchors={gqlAnchorsCnt}, tsAnchors={tsAnchors}");
+
+			// 3) Строим объединённое дерево: GraphQL поле + TypeScript resolver в одной папке.
+			var roots = MergeGqlAndTs(gqlRoots, tsNodes);
 
 			// 2) Сохраняем разметку на диск.
 			lock (markupLock)

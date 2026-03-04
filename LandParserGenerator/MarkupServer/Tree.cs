@@ -73,6 +73,9 @@ namespace MarkupServer
 		// parent group id + name (нужно, чтобы клиент мог переместить узел между группами без полного reload)
 		public string pg { get; set; }
 		public string pn { get; set; }
+		// field group id + name (2-й уровень группировки: поле внутри GraphQL-типа)
+		public string fg { get; set; }
+		public string fn { get; set; }
 	}
 
 

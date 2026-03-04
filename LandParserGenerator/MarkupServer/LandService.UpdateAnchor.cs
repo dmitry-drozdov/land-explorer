@@ -139,11 +139,14 @@ try
 				Args = newNode.Args,
 			};
 
-			// Новая группа (GraphQL): определяется по {file + type}.
-			// groupId должен совпадать с тем, что строится в listAnchors (MakeGroupId("gqlType", file, typeName)).
+			// Новая группа (GraphQL): 2 уровня
+			// 1) gqlType-группа определяется по {file + type}
+			// 2) gqlField-группа определяется по {file + type + field}
 			var parentType = updated.ParentNameRaw ?? "";
 			var parentGroupId = MakeGroupId("gqlType", updated.Filepath, parentType);
 			var parentGroupName = string.IsNullOrWhiteSpace(parentType) ? (updated.ParentNameNorm ?? "") : parentType;
+			var fieldGroupId = MakeGroupId("gqlField", updated.Filepath, parentType, updated.Name);
+			var fieldGroupName = updated.Name;
 
 			// Обновляем кэш: теперь дальнейшие updateAnchor будут отталкиваться от новой версии.
 			nodesById[p.anchorId] = updated;
@@ -155,7 +158,7 @@ try
 				{
 					if (currentMarkup?.Roots != null)
 					{
-						AnchorStore.UpsertAnchorInTree(currentMarkup.Roots, updated, parentGroupId, parentGroupName);
+					AnchorStore.UpsertAnchorInTree(currentMarkup.Roots, updated, parentGroupId, parentGroupName, fieldGroupId, fieldGroupName);
 						if (!AnchorStore.TrySave(currentFolderPath, currentMarkup, out var err))
 							Debug($"[updateAnchor] cannot save anchors cache: {err}");
 					}
@@ -166,7 +169,7 @@ try
 				Debug($"[updateAnchor] cache persist failed: {ex.Message}");
 			}
 
-			return Task.FromResult(MakeUpdateAnchorResult(updated, parentGroupId, parentGroupName));
+			return Task.FromResult(MakeUpdateAnchorResult(updated, parentGroupId, parentGroupName, fieldGroupId, fieldGroupName));
 		}
 	}
 }

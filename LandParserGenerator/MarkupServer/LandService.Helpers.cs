@@ -222,6 +222,12 @@ namespace MarkupServer
 
 
 
+		private static string CleanTsId(string s)
+		{
+			if (string.IsNullOrWhiteSpace(s)) return "";
+			return s.Replace("ID: ", "").Replace("id: ", "").Trim();
+		}
+
 		private Dictionary<string, List<Node>> GetTsNodes(Node root)
 		{
 			var res = new Dictionary<string, List<Node>>();
@@ -235,7 +241,7 @@ namespace MarkupServer
 				var nodeName = child.ToString();
 				if (nodeName == "struct" || nodeName == "class" || nodeName == "lamda_struct")
 				{
-					var className = child.Children[1].ToString();
+					var className = CleanTsId(child.Children[1].ToString());
 					var list = new List<Node>();
 					GetTsNodesHelp(child, list);
 
@@ -260,6 +266,168 @@ namespace MarkupServer
 			{
 				GetTsNodesHelp(child, tsNodes);
 			}
+		}
+
+		private static double TokenOverlap(string aNorm, string bNorm)
+		{
+			if (string.IsNullOrWhiteSpace(aNorm) || string.IsNullOrWhiteSpace(bNorm)) return 0;
+			var a = aNorm.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+			var b = bNorm.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+			if (a.Length == 0 || b.Length == 0) return 0;
+			var setB = new HashSet<string>(b);
+			var inter = a.Count(setB.Contains);
+			return (double)inter / a.Length;
+		}
+
+		private static bool ParentMatchLoose(string gqlParentNorm, string tsParentNorm)
+		{
+			if (string.IsNullOrWhiteSpace(gqlParentNorm) || string.IsNullOrWhiteSpace(tsParentNorm)) return false;
+			if (gqlParentNorm == tsParentNorm) return true;
+			// "query" должно матчиться с "query resolver" и т.п.
+			if (tsParentNorm.Contains(gqlParentNorm) || gqlParentNorm.Contains(tsParentNorm)) return true;
+			return TokenOverlap(gqlParentNorm, tsParentNorm) >= 0.8;
+		}
+
+		private TreeNode PickBestTsResolver(TreeNode gqlAnchor, List<TreeNode> candidates)
+		{
+			if (candidates == null || candidates.Count == 0) return null;
+			var gqlParent = gqlAnchor?.ParentNameNorm ?? "";
+			var gqlMethod = gqlAnchor?.MethodNameNorm ?? "";
+			TreeNode best = null;
+			double bestScore = double.NegativeInfinity;
+			foreach (var ts in candidates)
+			{
+				if (ts == null) continue;
+				if ((ts.MethodNameNorm ?? "") != gqlMethod) continue;
+				var score = 0.0;
+				var tsParent = ts.ParentNameNorm ?? "";
+				// базовый скор по совпадению родителя
+				if (tsParent == gqlParent) score += 10;
+				else if (ParentMatchLoose(gqlParent, tsParent)) score += 5;
+				else score += TokenOverlap(gqlParent, tsParent);
+
+				// tie-breaker: путь содержит "resolver"
+				var fp = (ts.Filepath ?? "").Replace('\\', '/').ToLowerInvariant();
+				if (fp.Contains("resolver")) score += 0.2;
+
+				if (score > bestScore)
+				{
+					bestScore = score;
+					best = ts;
+				}
+			}
+			// фильтр на совсем слабые матчи
+			if (best == null) return null;
+			if (bestScore < 1.0) return null;
+			return best;
+		}
+
+		/// <summary>
+		/// Объединяет GraphQL поле и TypeScript резолвер в один "field"-узел:
+		/// gqlTypeGroup -> gqlFieldGroup -> [gqlAnchor, tsAnchor?]
+		/// Неиспользованные TS-якоря уходят в отдельную группу "TypeScript (unmatched)".
+		/// </summary>
+		private List<TreeNode> MergeGqlAndTs(List<TreeNode> gqlRoots, List<TreeNode> tsNodes)
+		{
+			gqlRoots ??= new List<TreeNode>();
+			tsNodes ??= new List<TreeNode>();
+
+			var unusedTs = new List<TreeNode>(tsNodes.Where(x => x != null));
+
+			// индекс TS по точному ключу parent|method
+			var tsByExact = new Dictionary<string, List<TreeNode>>();
+			var tsByMethod = new Dictionary<string, List<TreeNode>>();
+			foreach (var ts in unusedTs)
+			{
+				var key = (ts.ParentNameNorm ?? "") + "|" + (ts.MethodNameNorm ?? "");
+				if (!tsByExact.TryGetValue(key, out var list1))
+					tsByExact[key] = list1 = new List<TreeNode>();
+				list1.Add(ts);
+
+				var m = ts.MethodNameNorm ?? "";
+				if (!tsByMethod.TryGetValue(m, out var list2))
+					tsByMethod[m] = list2 = new List<TreeNode>();
+				list2.Add(ts);
+			}
+
+			TreeNode TakeTsMatch(TreeNode gqlAnchor)
+			{
+				var exactKey = (gqlAnchor.ParentNameNorm ?? "") + "|" + (gqlAnchor.MethodNameNorm ?? "");
+				if (tsByExact.TryGetValue(exactKey, out var exactList) && exactList.Count > 0)
+				{
+					var ts = exactList[0];
+					exactList.RemoveAt(0);
+					unusedTs.RemoveAll(x => x.Id == ts.Id);
+					return ts;
+				}
+
+				var method = gqlAnchor.MethodNameNorm ?? "";
+				if (!tsByMethod.TryGetValue(method, out var cands) || cands.Count == 0)
+					return null;
+
+				// сначала фильтруем по "похожему" parent
+				var filtered = cands.Where(x => ParentMatchLoose(gqlAnchor.ParentNameNorm ?? "", x.ParentNameNorm ?? "")).ToList();
+				var best = PickBestTsResolver(gqlAnchor, filtered.Count > 0 ? filtered : cands);
+				if (best == null) return null;
+
+				// вынимаем из индексов
+				cands.RemoveAll(x => x.Id == best.Id);
+				unusedTs.RemoveAll(x => x.Id == best.Id);
+				return best;
+			}
+
+			foreach (var typeGroup in gqlRoots.Where(x => x != null && x.NodeType == "group"))
+			{
+				var nextChildren = new List<TreeNode>();
+				foreach (var gqlAnchor in (typeGroup.Children ?? new List<TreeNode>()).Where(x => x != null && x.NodeType == "anchor"))
+				{
+					var typeRaw = gqlAnchor.ParentNameRaw ?? typeGroup.Name ?? "";
+					var fieldGroupId = MakeGroupId("gqlField", gqlAnchor.Filepath, typeRaw, gqlAnchor.Name);
+					var fieldGroup = new TreeNode
+					{
+						Id = fieldGroupId,
+						Name = gqlAnchor.Name,
+						NodeType = "group",
+						Children = new List<TreeNode>(),
+					};
+					fieldGroup.Children.Add(gqlAnchor);
+
+					var ts = TakeTsMatch(gqlAnchor);
+					if (ts != null)
+						fieldGroup.Children.Add(ts);
+
+					nextChildren.Add(fieldGroup);
+				}
+				typeGroup.Children = nextChildren;
+			}
+
+			// Орфаны TS
+			if (unusedTs.Count > 0)
+			{
+				var orphanRoot = new TreeNode
+				{
+					Id = MakeGroupId("tsOrphans", currentFolderPath ?? ""),
+					Name = "TypeScript (unmatched)",
+					NodeType = "group",
+					Children = new List<TreeNode>(),
+				};
+
+				foreach (var grp in unusedTs.GroupBy(x => x.ParentNameRaw ?? "(root)"))
+				{
+					var g = new TreeNode
+					{
+						Id = MakeGroupId("tsClass", grp.Key, currentFolderPath ?? ""),
+						Name = grp.Key,
+						NodeType = "group",
+						Children = grp.ToList(),
+					};
+					orphanRoot.Children.Add(g);
+				}
+
+				gqlRoots.Add(orphanRoot);
+			}
+
+			return gqlRoots;
 		}
 
 		private void Debug(string msg)

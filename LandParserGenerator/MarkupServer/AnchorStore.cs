@@ -13,7 +13,7 @@ namespace MarkupServer
 	/// </summary>
 	internal static class AnchorStore
 	{
-		public const int CurrentVersion = 1;
+		public const int CurrentVersion = 2;
 		private const string FolderName = ".land";
 		private const string FileName = "anchors.json";
 
@@ -144,79 +144,132 @@ namespace MarkupServer
 		/// Обновляет anchor-узел в дереве и, при необходимости, переносит его между группами.
 		/// Используется в updateAnchor, потому что якорь может "переехать" в другой GraphQL-тип (группу).
 		/// </summary>
-		public static void UpsertAnchorInTree(List<TreeNode> roots, TreeNode updated, string targetGroupId, string targetGroupName)
+		public static void UpsertAnchorInTree(
+			List<TreeNode> roots,
+			TreeNode updated,
+			string targetTypeGroupId,
+			string targetTypeGroupName,
+			string targetFieldGroupId,
+			string targetFieldGroupName)
 		{
 			if (roots == null || updated == null || string.IsNullOrWhiteSpace(updated.Id))
 				return;
 
 			// 1) Удаляем старую версию узла из дерева (если она там есть)
-			TreeNode oldParentGroup = null;
-			bool RemoveIn(List<TreeNode> nodes, TreeNode parentGroup)
+			TreeNode oldTypeGroup = null;
+			TreeNode oldFieldGroup = null;
+			bool RemoveIn(List<TreeNode> nodes, TreeNode currentTypeGroup, TreeNode currentFieldGroup)
 			{
 				for (int i = 0; i < nodes.Count; i++)
 				{
 					var cur = nodes[i];
 					if (cur != null && cur.Id == updated.Id)
 					{
-						oldParentGroup = parentGroup;
+						oldTypeGroup = currentTypeGroup;
+						oldFieldGroup = currentFieldGroup;
 						nodes.RemoveAt(i);
 						return true;
 					}
 
 					if (cur?.Children != null && cur.Children.Count > 0)
 					{
-						var nextParent = string.Equals(cur.NodeType, "group", StringComparison.OrdinalIgnoreCase) ? cur : parentGroup;
-						if (RemoveIn(cur.Children, nextParent))
+						var nextType = currentTypeGroup;
+						var nextField = currentFieldGroup;
+						if (string.Equals(cur.NodeType, "group", StringComparison.OrdinalIgnoreCase))
+						{
+							if ((cur.Id ?? "").StartsWith("gqlType:", StringComparison.OrdinalIgnoreCase))
+								nextType = cur;
+							if ((cur.Id ?? "").StartsWith("gqlField:", StringComparison.OrdinalIgnoreCase))
+								nextField = cur;
+						}
+						if (RemoveIn(cur.Children, nextType, nextField))
 							return true;
 					}
 				}
 				return false;
 			}
 
-			RemoveIn(roots, null);
+			RemoveIn(roots, null, null);
 
-			// 2) Находим/создаём целевую группу. Если groupId не задан — просто пытаемся заменить/добавить как root.
-			if (string.IsNullOrWhiteSpace(targetGroupId))
+			// 2) Находим/создаём целевую type-группу. Если она не задана — просто пытаемся заменить/добавить как root.
+			if (string.IsNullOrWhiteSpace(targetTypeGroupId))
 			{
 				if (!ReplaceNodeInTree(roots, updated))
 					roots.Add(updated);
 				return;
 			}
 
-			var targetGroup = roots.FirstOrDefault(x => x != null
+			var typeGroup = roots.FirstOrDefault(x => x != null
 				&& string.Equals(x.NodeType, "group", StringComparison.OrdinalIgnoreCase)
-				&& x.Id == targetGroupId);
+				&& x.Id == targetTypeGroupId);
 
-			if (targetGroup == null)
+			if (typeGroup == null)
 			{
-				targetGroup = new TreeNode
+				typeGroup = new TreeNode
 				{
-					Id = targetGroupId,
-					Name = targetGroupName,
+					Id = targetTypeGroupId,
+					Name = targetTypeGroupName,
 					NodeType = "group",
 					Children = new List<TreeNode>(),
 				};
-				roots.Add(targetGroup);
+				roots.Add(typeGroup);
 			}
 			else
 			{
 				// если группа существует, но Name пустое — заполним
-				if (string.IsNullOrWhiteSpace(targetGroup.Name) && !string.IsNullOrWhiteSpace(targetGroupName))
-					targetGroup.Name = targetGroupName;
+				if (string.IsNullOrWhiteSpace(typeGroup.Name) && !string.IsNullOrWhiteSpace(targetTypeGroupName))
+					typeGroup.Name = targetTypeGroupName;
 			}
 
-			// 3) Вставляем обновлённый anchor в целевую группу
-			targetGroup.Children ??= new List<TreeNode>();
-			targetGroup.Children.RemoveAll(x => x != null && x.Id == updated.Id);
-			targetGroup.Children.Add(updated);
-
-			// 4) Если старая группа опустела — удаляем её, чтобы дерево не засорялось пустыми группами.
-			if (oldParentGroup != null
-				&& !ReferenceEquals(oldParentGroup, targetGroup)
-				&& string.Equals(oldParentGroup.NodeType, "group", StringComparison.OrdinalIgnoreCase)
-				&& (oldParentGroup.Children == null || oldParentGroup.Children.Count == 0))
+			// 3) Находим/создаём целевую field-группу внутри type-группы
+			typeGroup.Children ??= new List<TreeNode>();
+			TreeNode fieldGroup = null;
+			if (!string.IsNullOrWhiteSpace(targetFieldGroupId))
 			{
-				roots.RemoveAll(x => x != null && x.Id == oldParentGroup.Id);
+				fieldGroup = typeGroup.Children.FirstOrDefault(x => x != null
+					&& string.Equals(x.NodeType, "group", StringComparison.OrdinalIgnoreCase)
+					&& x.Id == targetFieldGroupId);
+
+				if (fieldGroup == null)
+				{
+					fieldGroup = new TreeNode
+					{
+						Id = targetFieldGroupId,
+						Name = targetFieldGroupName,
+						NodeType = "group",
+						Children = new List<TreeNode>(),
+					};
+					typeGroup.Children.Add(fieldGroup);
+				}
+				else
+				{
+					if (string.IsNullOrWhiteSpace(fieldGroup.Name) && !string.IsNullOrWhiteSpace(targetFieldGroupName))
+						fieldGroup.Name = targetFieldGroupName;
+				}
+			}
+
+			// 4) Вставляем/обновляем anchor в field-группе (если есть), иначе прямо в type-группе.
+			var targetContainer = fieldGroup?.Children ?? typeGroup.Children;
+			if (fieldGroup != null)
+				fieldGroup.Children ??= new List<TreeNode>();
+			targetContainer.RemoveAll(x => x != null && x.Id == updated.Id);
+			targetContainer.Add(updated);
+
+			// 5) Если старая field-группа опустела — удаляем её, затем проверяем type-группу.
+			if (oldFieldGroup != null
+				&& string.Equals(oldFieldGroup.NodeType, "group", StringComparison.OrdinalIgnoreCase)
+				&& (oldFieldGroup.Children == null || oldFieldGroup.Children.Count == 0)
+				&& oldTypeGroup != null)
+			{
+				oldTypeGroup.Children?.RemoveAll(x => x != null && x.Id == oldFieldGroup.Id);
+			}
+
+			if (oldTypeGroup != null
+				&& string.Equals(oldTypeGroup.NodeType, "group", StringComparison.OrdinalIgnoreCase)
+				&& (oldTypeGroup.Children == null || oldTypeGroup.Children.Count == 0)
+				&& !ReferenceEquals(oldTypeGroup, typeGroup))
+			{
+				roots.RemoveAll(x => x != null && x.Id == oldTypeGroup.Id);
 			}
 		}
 	}
