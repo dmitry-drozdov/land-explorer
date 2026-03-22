@@ -23,19 +23,20 @@ namespace MarkupServer
 		public int? EndOffset { get; set; }
 
 		// внутренние поля (нужны для updateAnchor / метрик, но не отдаются в плагин)
+		public string Language { get; set; }
+		public string AnchorKind { get; set; }
+		public string AnchorFamily { get; set; }
+		public string GqlTypeKind { get; set; }
 		public string MethodNameNorm { get; set; }
 		public string ParentNameNorm { get; set; }
-		// raw-значение родителя (например имя GraphQL-типа). Нужен для правильной группировки.
+		// raw-значение родителя (например имя GraphQL-типа или kind для type_def). Нужен для правильной группировки.
 		public string ParentNameRaw { get; set; }
 		public string ReturnTypeNorm { get; set; }
 		public List<Arg> Args { get; set; }
+		public int? OrdinalInParent { get; set; }
+		public Dictionary<string, double> NeighborBag { get; set; }
 	}
 
-	/// <summary>
-	/// DTO, который уходит в плагин.
-	/// (теперь всегда используется протокол v2 с компактными именами полей).
-	/// </summary>
-	/// 
 	/// <summary>
 	/// DTO для протокола v2 (компактные имена полей).
 	/// id/n/t/c/f/s/e соответствуют:
@@ -77,7 +78,6 @@ namespace MarkupServer
 		public string fg { get; set; }
 		public string fn { get; set; }
 	}
-
 
 	public class ListTreeParams
 	{

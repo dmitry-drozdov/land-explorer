@@ -36,6 +36,8 @@ namespace VPTree
 		// This prevents a systematic +NeighW penalty (e.g., +0.1) for unchanged points.
 		private Dictionary<string, MethodAnchor> _sigIndex;
 
+		public int BuildDepth { get; private set; }
+
 		public VPTree(IList<T> items, Func<T, T, double> distance, int? seed = null, ITracer tracer = null)
 		{
 			if (items == null || items.Count == 0) throw new ArgumentException("items empty");
@@ -47,11 +49,12 @@ namespace VPTree
 			{
 				MaybeBuildNeighborBags();
 				EnsureSigIndexBuilt();
+
 				_root = Build(idxs);
+				BuildDepth = ComputeDepth(_root);
 				if (scope != null)
 				{
-					int depth = ComputeDepth(_root);
-					scope.Span.SetTag("vptree.build.depth", depth);
+					scope.Span.SetTag("vptree.build.depth", BuildDepth);
 				}
 			}
 		}
@@ -153,27 +156,27 @@ namespace VPTree
 			return 1 + (ld > rd ? ld : rd);
 		}
 
-		
-private static string ArgsKey(MethodAnchor m)
-{
-	if (m == null || m.Args == null || m.Args.Count == 0) return "";
-	// keep order; names are already normalized
-	var sb = new StringBuilder(m.Args.Count * 16);
-	for (int i = 0; i < m.Args.Count; i++)
-	{
-		var a = m.Args[i];
-		if (i > 0) sb.Append('|');
-		sb.Append(a?.TypeNorm ?? "").Append(':').Append(a?.NameNorm ?? "");
-	}
-	return sb.ToString();
-}
 
-private static string SigKey(MethodAnchor m)
-{
-	if (m == null) return "";
-	// Receiver + name + return + args: should uniquely identify a method in most codebases
-	return (m.ParentNameNorm ?? "") + "|" + (m.MethodNameNorm ?? "") + "|" + (m.ReturnTypeNorm ?? "") + "|" + ArgsKey(m);
-}
+		private static string ArgsKey(MethodAnchor m)
+		{
+			if (m == null || m.Args == null || m.Args.Count == 0) return "";
+			// keep order; names are already normalized
+			var sb = new StringBuilder(m.Args.Count * 16);
+			for (int i = 0; i < m.Args.Count; i++)
+			{
+				var a = m.Args[i];
+				if (i > 0) sb.Append('|');
+				sb.Append(a?.TypeNorm ?? "").Append(':').Append(a?.NameNorm ?? "");
+			}
+			return sb.ToString();
+		}
+
+		private static string SigKey(MethodAnchor m)
+		{
+			if (m == null) return "";
+			// Receiver + name + return + args: should uniquely identify a method in most codebases
+			return (m.ParentNameNorm ?? "") + "|" + (m.MethodNameNorm ?? "") + "|" + (m.ReturnTypeNorm ?? "") + "|" + ArgsKey(m);
+		}
 
 
 

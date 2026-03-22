@@ -1,4 +1,5 @@
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -8,12 +9,13 @@ using System.Text;
 namespace MarkupServer
 {
 	/// <summary>
-	/// Персистентное хранение разметки (дерева TreeNode) для конкретного folderPath.
-	/// Храним ТОЛЬКО «снимок разметки» (Roots + якоря), VP-дерево не сохраняем.
+	/// Персистентное хранение semantic snapshot разметки.
+	/// Храним anchors + relations + materialized Roots для быстрого старта.
+	/// VP-дерево не сохраняем.
 	/// </summary>
 	internal static class AnchorStore
 	{
-		public const int CurrentVersion = 2;
+		public const int CurrentVersion = 4;
 		private const string FolderName = ".land";
 		private const string FileName = "anchors.json";
 
@@ -34,21 +36,61 @@ namespace MarkupServer
 					return false;
 
 				var json = File.ReadAllText(path, Encoding.UTF8);
-				var parsed = JsonConvert.DeserializeObject<PersistedMarkup>(json);
-				if (parsed == null)
+				if (string.IsNullOrWhiteSpace(json))
 				{
-					error = "file is empty or invalid json";
+					error = "file is empty";
 					return false;
 				}
 
-				if (parsed.Version != CurrentVersion)
+				var jo = JObject.Parse(json);
+				var version = jo.Value<int?>(nameof(PersistedMarkup.Version)) ?? 0;
+
+				if (version == CurrentVersion)
 				{
-					error = $"unsupported cache version {parsed.Version} (expected {CurrentVersion})";
-					return false;
+					var parsed = jo.ToObject<PersistedMarkup>();
+					if (parsed == null)
+					{
+						error = "file is invalid json";
+						return false;
+					}
+
+					parsed.Anchors ??= DeriveAnchorsFromRoots(parsed.Roots);
+					foreach (var anchor in parsed.Anchors)
+						EnsureAnchorSemantics(anchor);
+					parsed.Relations ??= DeriveRelationsFromRoots(parsed.Roots);
+					parsed.Roots ??= new List<TreeNode>();
+					data = parsed;
+					return true;
 				}
 
-				data = parsed;
-				return true;
+				if (version == 2 || version == 3)
+				{
+					var legacy = jo.ToObject<PersistedMarkup>();
+					if (legacy == null)
+					{
+						error = "file is invalid json";
+						return false;
+					}
+
+					var roots = legacy.Roots ?? new List<TreeNode>();
+					var anchors = legacy.Anchors ?? DeriveAnchorsFromRoots(roots);
+					foreach (var anchor in anchors)
+						EnsureAnchorSemantics(anchor);
+
+					data = new PersistedMarkup
+					{
+						Version = CurrentVersion,
+						FolderPath = legacy.FolderPath,
+						UpdatedAtUtc = legacy.UpdatedAtUtc,
+						Roots = roots,
+						Anchors = anchors,
+						Relations = legacy.Relations ?? DeriveRelationsFromRoots(roots),
+					};
+					return true;
+				}
+
+				error = $"unsupported cache version {version} (expected {CurrentVersion})";
+				return false;
 			}
 			catch (Exception ex)
 			{
@@ -71,6 +113,11 @@ namespace MarkupServer
 				data.Version = CurrentVersion;
 				data.FolderPath = folderPath;
 				data.UpdatedAtUtc = DateTime.UtcNow;
+				data.Anchors ??= new List<TreeNode>();
+				foreach (var anchor in data.Anchors)
+					EnsureAnchorSemantics(anchor);
+				data.Relations ??= new List<PersistedRelation>();
+				data.Roots ??= new List<TreeNode>();
 
 				var json = JsonConvert.SerializeObject(
 					data,
@@ -78,10 +125,8 @@ namespace MarkupServer
 					new JsonSerializerSettings
 					{
 						NullValueHandling = NullValueHandling.Ignore
-					}
-				);
+					});
 
-				// tmp + move, чтобы не оставлять полупустой файл при падении.
 				var tmp = path + ".tmp";
 				File.WriteAllText(tmp, json, Encoding.UTF8);
 				if (File.Exists(path))
@@ -93,6 +138,37 @@ namespace MarkupServer
 			{
 				error = ex.Message;
 				return false;
+			}
+		}
+
+		private static void EnsureAnchorSemantics(TreeNode anchor)
+		{
+			if (anchor == null)
+				return;
+
+			if (string.IsNullOrWhiteSpace(anchor.Language))
+			{
+				if ((anchor.Id ?? "").StartsWith("ts:", StringComparison.OrdinalIgnoreCase))
+				{
+					anchor.Language = "ts";
+					anchor.AnchorKind = string.IsNullOrWhiteSpace(anchor.AnchorKind) ? "tsMember" : anchor.AnchorKind;
+				}
+				else
+				{
+					anchor.Language = "gql";
+					anchor.AnchorKind = string.IsNullOrWhiteSpace(anchor.AnchorKind) ? "gqlField" : anchor.AnchorKind;
+				}
+			}
+
+			if (string.IsNullOrWhiteSpace(anchor.AnchorFamily))
+			{
+				anchor.AnchorFamily = (anchor.AnchorKind ?? "") switch
+				{
+					"gqlTypeDef" => "recordLike",
+					"gqlInputDef" => "recordLike",
+					"gqlInterfaceDef" => "recordLike",
+					_ => "callableMember",
+				};
 			}
 		}
 
@@ -113,165 +189,79 @@ namespace MarkupServer
 			}
 		}
 
-		public static bool ReplaceNodeInTree(List<TreeNode> roots, TreeNode updated)
+		private static List<TreeNode> DeriveAnchorsFromRoots(List<TreeNode> roots)
 		{
-			if (roots == null || updated == null || string.IsNullOrWhiteSpace(updated.Id))
-				return false;
+			var anchors = EnumerateNodes(roots)
+				.Where(x => x?.NodeType == "anchor" && !string.IsNullOrWhiteSpace(x.Id))
+				.Select(CloneAnchor)
+				.ToList();
 
-			bool ReplaceIn(List<TreeNode> nodes)
-			{
-				for (int i = 0; i < nodes.Count; i++)
-				{
-					var cur = nodes[i];
-					if (cur != null && cur.Id == updated.Id)
-					{
-						// сохраняем Children, если сервер вернул узел без Children
-						updated.Children = updated.Children ?? cur.Children;
-						nodes[i] = updated;
-						return true;
-					}
+			foreach (var anchor in anchors)
+				EnsureAnchorSemantics(anchor);
 
-					if (cur?.Children != null && ReplaceIn(cur.Children))
-						return true;
-				}
-				return false;
-			}
-
-			return ReplaceIn(roots);
+			return anchors;
 		}
 
-		/// <summary>
-		/// Обновляет anchor-узел в дереве и, при необходимости, переносит его между группами.
-		/// Используется в updateAnchor, потому что якорь может "переехать" в другой GraphQL-тип (группу).
-		/// </summary>
-		public static void UpsertAnchorInTree(
-			List<TreeNode> roots,
-			TreeNode updated,
-			string targetTypeGroupId,
-			string targetTypeGroupName,
-			string targetFieldGroupId,
-			string targetFieldGroupName)
+		private static List<PersistedRelation> DeriveRelationsFromRoots(List<TreeNode> roots)
 		{
-			if (roots == null || updated == null || string.IsNullOrWhiteSpace(updated.Id))
-				return;
-
-			// 1) Удаляем старую версию узла из дерева (если она там есть)
-			TreeNode oldTypeGroup = null;
-			TreeNode oldFieldGroup = null;
-			bool RemoveIn(List<TreeNode> nodes, TreeNode currentTypeGroup, TreeNode currentFieldGroup)
+			var relations = new List<PersistedRelation>();
+			foreach (var group in EnumerateNodes(roots).Where(x => x?.NodeType == "group" && (x.Id ?? "").StartsWith("gqlField:", StringComparison.OrdinalIgnoreCase)))
 			{
-				for (int i = 0; i < nodes.Count; i++)
+				var gql = group.Children?.FirstOrDefault(x => x?.NodeType == "anchor" && (x.Id ?? "").StartsWith("gql:", StringComparison.OrdinalIgnoreCase));
+				if (gql == null)
+					continue;
+
+				var targets = group.Children
+					.Where(x => x?.NodeType == "anchor" && (x.Id ?? "").StartsWith("ts:", StringComparison.OrdinalIgnoreCase))
+					.Select(x => x.Id)
+					.Distinct(StringComparer.OrdinalIgnoreCase)
+					.ToList();
+
+				if (targets.Count == 0)
+					continue;
+
+				relations.Add(new PersistedRelation
 				{
-					var cur = nodes[i];
-					if (cur != null && cur.Id == updated.Id)
-					{
-						oldTypeGroup = currentTypeGroup;
-						oldFieldGroup = currentFieldGroup;
-						nodes.RemoveAt(i);
-						return true;
-					}
-
-					if (cur?.Children != null && cur.Children.Count > 0)
-					{
-						var nextType = currentTypeGroup;
-						var nextField = currentFieldGroup;
-						if (string.Equals(cur.NodeType, "group", StringComparison.OrdinalIgnoreCase))
-						{
-							if ((cur.Id ?? "").StartsWith("gqlType:", StringComparison.OrdinalIgnoreCase))
-								nextType = cur;
-							if ((cur.Id ?? "").StartsWith("gqlField:", StringComparison.OrdinalIgnoreCase))
-								nextField = cur;
-						}
-						if (RemoveIn(cur.Children, nextType, nextField))
-							return true;
-					}
-				}
-				return false;
+					SourceAnchorId = gql.Id,
+					TargetAnchorIds = targets,
+				});
 			}
 
-			RemoveIn(roots, null, null);
-
-			// 2) Находим/создаём целевую type-группу. Если она не задана — просто пытаемся заменить/добавить как root.
-			if (string.IsNullOrWhiteSpace(targetTypeGroupId))
-			{
-				if (!ReplaceNodeInTree(roots, updated))
-					roots.Add(updated);
-				return;
-			}
-
-			var typeGroup = roots.FirstOrDefault(x => x != null
-				&& string.Equals(x.NodeType, "group", StringComparison.OrdinalIgnoreCase)
-				&& x.Id == targetTypeGroupId);
-
-			if (typeGroup == null)
-			{
-				typeGroup = new TreeNode
-				{
-					Id = targetTypeGroupId,
-					Name = targetTypeGroupName,
-					NodeType = "group",
-					Children = new List<TreeNode>(),
-				};
-				roots.Add(typeGroup);
-			}
-			else
-			{
-				// если группа существует, но Name пустое — заполним
-				if (string.IsNullOrWhiteSpace(typeGroup.Name) && !string.IsNullOrWhiteSpace(targetTypeGroupName))
-					typeGroup.Name = targetTypeGroupName;
-			}
-
-			// 3) Находим/создаём целевую field-группу внутри type-группы
-			typeGroup.Children ??= new List<TreeNode>();
-			TreeNode fieldGroup = null;
-			if (!string.IsNullOrWhiteSpace(targetFieldGroupId))
-			{
-				fieldGroup = typeGroup.Children.FirstOrDefault(x => x != null
-					&& string.Equals(x.NodeType, "group", StringComparison.OrdinalIgnoreCase)
-					&& x.Id == targetFieldGroupId);
-
-				if (fieldGroup == null)
-				{
-					fieldGroup = new TreeNode
-					{
-						Id = targetFieldGroupId,
-						Name = targetFieldGroupName,
-						NodeType = "group",
-						Children = new List<TreeNode>(),
-					};
-					typeGroup.Children.Add(fieldGroup);
-				}
-				else
-				{
-					if (string.IsNullOrWhiteSpace(fieldGroup.Name) && !string.IsNullOrWhiteSpace(targetFieldGroupName))
-						fieldGroup.Name = targetFieldGroupName;
-				}
-			}
-
-			// 4) Вставляем/обновляем anchor в field-группе (если есть), иначе прямо в type-группе.
-			var targetContainer = fieldGroup?.Children ?? typeGroup.Children;
-			if (fieldGroup != null)
-				fieldGroup.Children ??= new List<TreeNode>();
-			targetContainer.RemoveAll(x => x != null && x.Id == updated.Id);
-			targetContainer.Add(updated);
-
-			// 5) Если старая field-группа опустела — удаляем её, затем проверяем type-группу.
-			if (oldFieldGroup != null
-				&& string.Equals(oldFieldGroup.NodeType, "group", StringComparison.OrdinalIgnoreCase)
-				&& (oldFieldGroup.Children == null || oldFieldGroup.Children.Count == 0)
-				&& oldTypeGroup != null)
-			{
-				oldTypeGroup.Children?.RemoveAll(x => x != null && x.Id == oldFieldGroup.Id);
-			}
-
-			if (oldTypeGroup != null
-				&& string.Equals(oldTypeGroup.NodeType, "group", StringComparison.OrdinalIgnoreCase)
-				&& (oldTypeGroup.Children == null || oldTypeGroup.Children.Count == 0)
-				&& !ReferenceEquals(oldTypeGroup, typeGroup))
-			{
-				roots.RemoveAll(x => x != null && x.Id == oldTypeGroup.Id);
-			}
+			return relations;
 		}
+
+		private static TreeNode CloneAnchor(TreeNode n)
+		{
+			if (n == null)
+				return null;
+
+			return new TreeNode
+			{
+				Id = n.Id,
+				Name = n.Name,
+				NodeType = n.NodeType,
+				Filepath = n.Filepath,
+				StartOffset = n.StartOffset,
+				EndOffset = n.EndOffset,
+				Language = n.Language,
+				AnchorKind = n.AnchorKind,
+				AnchorFamily = n.AnchorFamily,
+				GqlTypeKind = n.GqlTypeKind,
+				MethodNameNorm = n.MethodNameNorm,
+				ParentNameNorm = n.ParentNameNorm,
+				ParentNameRaw = n.ParentNameRaw,
+				ReturnTypeNorm = n.ReturnTypeNorm,
+				Args = n.Args?.Select(x => new Arg { TypeNorm = x.TypeNorm, NameNorm = x.NameNorm }).ToList(),
+				OrdinalInParent = n.OrdinalInParent,
+				NeighborBag = n.NeighborBag != null ? new Dictionary<string, double>(n.NeighborBag, StringComparer.Ordinal) : null,
+			};
+		}
+	}
+
+	internal sealed class PersistedRelation
+	{
+		public string SourceAnchorId { get; set; }
+		public List<string> TargetAnchorIds { get; set; } = new();
 	}
 
 	internal sealed class PersistedMarkup
@@ -280,5 +270,7 @@ namespace MarkupServer
 		public string FolderPath { get; set; }
 		public DateTime UpdatedAtUtc { get; set; }
 		public List<TreeNode> Roots { get; set; } = new();
+		public List<TreeNode> Anchors { get; set; } = new();
+		public List<PersistedRelation> Relations { get; set; } = new();
 	}
 }

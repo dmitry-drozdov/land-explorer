@@ -1,68 +1,46 @@
 ﻿using StreamJsonRpc;
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using VPTree;
-using Land.Core.Parsing.Tree;
 
 namespace MarkupServer
 {
 	public partial class LandService
 	{
-		private void BuildCurrentGqlTreeFromDisk()
+		private void BuildCurrentRebindingForestsFromDisk()
 		{
 			if (string.IsNullOrWhiteSpace(currentFolderPath))
 				throw new InvalidOperationException("currentFolderPath is empty. Call land/listAnchors first.");
 
-			currentGqlAnchors.Clear();
-			currentGqlNodes.Clear();
+			currentContextsByProfileKey.Clear();
+			currentNodesByProfileKey.Clear();
+			currentTreesByProfileKey.Clear();
 
-			Tracing.Init();
+			BuildSemanticMarkupFromDisk(out var gqlAnchors, out var tsAnchors);
+			var allAnchors = gqlAnchors.Concat(tsAnchors).Where(CanParticipateInRebinding).ToList();
 
-			var gqlFiles = GetAllFiles(currentFolderPath, "graphql");
-			using (Tracing.Tracer.BuildSpan("RebuildGqlIndex").StartActive())
+			foreach (var grp in allAnchors.GroupBy(GetProfileKey, StringComparer.OrdinalIgnoreCase))
 			{
-				foreach (var gqlFile in gqlFiles)
-				{
-					var txt = File.ReadAllText(gqlFile);
-					Node root;
-					using (Tracing.Tracer.BuildSpan("ParseGql").StartActive())
-						root = graphqlParser.Parse(txt).Item1;
+				var nodes = grp.Select(CloneAnchor).ToList();
+				var contexts = nodes.Select(BuildAnchorContext).Where(x => x != null).ToList();
+				currentNodesByProfileKey[grp.Key] = nodes;
+				currentContextsByProfileKey[grp.Key] = contexts;
+				if (contexts.Count == 0)
+					continue;
 
-					var funcs = GetFuncs(root);
-					foreach (var funcsPerType in funcs)
-					{
-						foreach (var func in funcsPerType.Value)
-						{
-							var treeNode = GetTreeNodeFromGqlNode(func, gqlFile);
-							currentGqlNodes.Add(treeNode);
-
-							currentGqlAnchors.Add(new MethodAnchor
-							{
-								Id = treeNode.Id,
-								ParentNameNorm = treeNode.ParentNameNorm,
-								MethodNameNorm = treeNode.MethodNameNorm,
-								ReturnTypeNorm = treeNode.ReturnTypeNorm,
-								StartOffset = treeNode.StartOffset ?? 0,
-								EndOffset = treeNode.EndOffset ?? 0,
-								Args = (treeNode.Args ?? new List<Arg>())
-									.Select(x => new MethodAnchor.Arg { TypeNorm = x.TypeNorm, NameNorm = x.NameNorm })
-									.ToList(),
-							});
-						}
-					}
-				}
-			}
-
-			using (Tracing.Tracer.BuildSpan("RebuildGqlVPTree").StartActive())
-				currentTree = new VPTree<MethodAnchor>(
-					currentGqlAnchors,
-					(a, b) => Dist.AnchorDistance(a, b, currentWeights),
+				var weights = GetWeightsForProfileKey(grp.Key);
+				var tree = new VPTree<AnchorContext>(
+					contexts,
+					(a, b) => AnchorContextDistance(a, b, weights),
 					42,
-					Tracing.Tracer
-				);
+					Tracing.Tracer);
+
+				currentTreesByProfileKey[grp.Key] = tree;
+
+				Debug($"[vptree] built profile={grp.Key}, size={contexts.Count}, depth={tree.BuildDepth}");
+			}
 		}
 
 		[JsonRpcMethod("land/updateAnchor", UseSingleObjectParameterDeserialization = true)]
@@ -71,97 +49,69 @@ namespace MarkupServer
 			if (p == null || string.IsNullOrWhiteSpace(p.anchorId))
 				throw new ArgumentException("anchorId is required");
 
-			// anchorId — это ID "сущности якоря", которое пришло из последнего listAnchors.
-			// Оно НЕ обязано соответствовать каким-то id в новом коде. Поэтому:
-			// 1) по anchorId берём признаки СТАРОГО якоря из кэша nodesById
-			// 2) строим VP-дерево по НОВОМУ коду
-			// 3) ищем ближайший узел и возвращаем updatedNode с тем же anchorId
-
 			if (!nodesById.TryGetValue(p.anchorId, out var oldNode) || oldNode == null)
 			{
 				Debug($"not found anchor by id [{p.anchorId}] (cache lost). Please run land/listAnchors again.");
 				return Task.FromResult(MakeUpdateAnchorResult(null));
 			}
-			// Защита: updateAnchor предназначен для перепривязки GraphQL-якорей.
-			// Проверяем по префиксу ID, т.к. Name теперь используется как отображаемое имя (MethodName).
-			if (!(oldNode.Id ?? "").StartsWith("gql:", StringComparison.OrdinalIgnoreCase))
+
+			EnsureAnchorFamily(oldNode);
+			var profileKey = GetProfileKey(oldNode);
+			if (string.IsNullOrWhiteSpace(profileKey))
 			{
-				Debug($"[updateAnchor] anchor [{p.anchorId}] has Id='{oldNode.Id}', expected prefix 'gql:'. Skipping.");
+				Debug($"[updateAnchor] anchor [{p.anchorId}] has unsupported rebind profile.");
 				return Task.FromResult(MakeUpdateAnchorResult(null));
 			}
 
-try
+			try
 			{
-				BuildCurrentGqlTreeFromDisk();
+				BuildCurrentRebindingForestsFromDisk();
 			}
 			catch (Exception ex)
 			{
-				Debug($"[updateAnchor] cannot rebuild gql tree: {ex.Message}");
+				Debug($"[updateAnchor] cannot rebuild rebinding forest: {ex.Message}");
 				return Task.FromResult(MakeUpdateAnchorResult(null));
 			}
 
-			if (currentTree == null || currentGqlAnchors.Count == 0)
-				return Task.FromResult(MakeUpdateAnchorResult(null));
-
-			var query = new MethodAnchor
+			if (!currentTreesByProfileKey.TryGetValue(profileKey, out var tree)
+				|| !currentContextsByProfileKey.TryGetValue(profileKey, out var contexts)
+				|| !currentNodesByProfileKey.TryGetValue(profileKey, out var nodes)
+				|| contexts.Count == 0)
 			{
-				Id = oldNode.Id,
-				ParentNameNorm = oldNode.ParentNameNorm,
-				ReturnTypeNorm = oldNode.ReturnTypeNorm,
-				MethodNameNorm = oldNode.MethodNameNorm,
-				Args = (oldNode.Args ?? new List<Arg>())
-					.Select(x => new MethodAnchor.Arg { TypeNorm = x.TypeNorm, NameNorm = x.NameNorm })
-					.ToList(),
-			};
+				Debug($"[updateAnchor] no index for profile='{profileKey}'.");
+				return Task.FromResult(MakeUpdateAnchorResult(null));
+			}
 
-			var cands = currentTree.KNearest(query, 1);
+			var query = BuildAnchorContext(oldNode);
+			var cands = tree.KNearest(query, 1);
 			if (cands == null || cands.Count == 0)
 				return Task.FromResult(MakeUpdateAnchorResult(null));
 
 			var best = cands[0];
-			var newNode = currentGqlNodes[best.Index];
+			var newNode = nodes[best.Index];
+			Debug($"[updateAnchor] profile={profileKey} dist={best.Dist} -> {newNode?.Filepath}:{newNode?.StartOffset}-{newNode?.EndOffset} {newNode?.Name}");
 
-			Debug($"[updateAnchor] dist={best.Dist} -> {newNode?.Filepath}:{newNode?.StartOffset}-{newNode?.EndOffset} {newNode?.ParentNameNorm}.{newNode?.MethodNameNorm}");
+			var updated = CloneAnchor(newNode);
+			updated.Id = p.anchorId;
+			updated.AnchorFamily = EnsureAnchorFamily(updated);
 
-			// Важно: сохраняем anchorId (сущность), но обновляем позицию/признаки на новые.
-			var updated = new TreeNode
-			{
-				Id = p.anchorId,
-				Name = newNode.Name,           // отображаемое имя якоря = MethodName из нового кода
-				NodeType = "anchor",
-				Filepath = newNode.Filepath,
-				StartOffset = newNode.StartOffset,
-				EndOffset = newNode.EndOffset,
-				ParentNameNorm = newNode.ParentNameNorm,
-				ParentNameRaw = newNode.ParentNameRaw,
-				MethodNameNorm = newNode.MethodNameNorm,
-				ReturnTypeNorm = newNode.ReturnTypeNorm,
-				Args = newNode.Args,
-			};
+			var isGql = string.Equals(updated.Language, LangGql, StringComparison.OrdinalIgnoreCase);
+			var parentGroupId = isGql ? GetTypeGroupId(updated) : null;
+			var parentGroupName = isGql ? GetTypeGroupName(updated) : null;
+			var fieldGroupId = isGql ? GetFieldGroupId(updated) : null;
+			var fieldGroupName = isGql ? GetFieldGroupName(updated) : null;
 
-			// Новая группа (GraphQL): 2 уровня
-			// 1) gqlType-группа определяется по {file + type}
-			// 2) gqlField-группа определяется по {file + type + field}
-			var parentType = updated.ParentNameRaw ?? "";
-			var parentGroupId = MakeGroupId("gqlType", updated.Filepath, parentType);
-			var parentGroupName = string.IsNullOrWhiteSpace(parentType) ? (updated.ParentNameNorm ?? "") : parentType;
-			var fieldGroupId = MakeGroupId("gqlField", updated.Filepath, parentType, updated.Name);
-			var fieldGroupName = updated.Name;
-
-			// Обновляем кэш: теперь дальнейшие updateAnchor будут отталкиваться от новой версии.
 			nodesById[p.anchorId] = updated;
 
-			// И обновляем персистентный snapshot на диске (если он загружен/создан).
 			try
 			{
 				lock (markupLock)
 				{
-					if (currentMarkup?.Roots != null)
-					{
-					AnchorStore.UpsertAnchorInTree(currentMarkup.Roots, updated, parentGroupId, parentGroupName, fieldGroupId, fieldGroupName);
-						if (!AnchorStore.TrySave(currentFolderPath, currentMarkup, out var err))
-							Debug($"[updateAnchor] cannot save anchors cache: {err}");
-					}
+					ReplaceAnchorInMarkupUnsafe(updated);
+					RebuildMarkupRootsUnsafe();
+					ReloadNodesByIdUnsafe();
+					if (!AnchorStore.TrySave(currentFolderPath, currentMarkup, out var err))
+						Debug($"[updateAnchor] cannot save anchors cache: {err}");
 				}
 			}
 			catch (Exception ex)

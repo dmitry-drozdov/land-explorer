@@ -15,25 +15,32 @@ namespace MarkupServer
 {
 	public partial class LandService
 	{
-		// Текущий snapshot разметки (Roots), загруженный/созданный для currentFolderPath.
-		// Нужен, чтобы updateAnchor мог обновлять файл на диске.
+		// Текущий snapshot разметки (semantic snapshot + Roots), загруженный/созданный для currentFolderPath.
 		private PersistedMarkup currentMarkup;
 		private readonly object markupLock = new object();
 
 		private BaseParser graphqlParser;
 		private BaseParser typescriptParser;
-		// Все узлы, которые мы отдали в дерево (anchor'ы нужны для updateAnchor).
-		// ВАЖНО: ключ должен быть глобально уникальным на весь folder (иначе коллизии при нескольких файлах).
+		// Все anchor-узлы, которые мы отдали в дерево. Нужны для updateAnchor.
 		private Dictionary<string, TreeNode> nodesById = [];
 
-		// Кэш последнего построенного дерева для папки (чтобы updateAnchor работал на весь folder,
-		// и не было жёстко зашитых путей).
+		// Кэш последнего построенного дерева для папки.
 		private string currentFolderPath;
-		private List<MethodAnchor> currentGqlAnchors = new();
-		private List<TreeNode> currentGqlNodes = new();
-		private VPTree<MethodAnchor> currentTree;
-		private Dist.Weights currentWeights = new();
+		private readonly Dictionary<string, List<AnchorContext>> currentContextsByProfileKey = new(StringComparer.OrdinalIgnoreCase);
+		private readonly Dictionary<string, List<TreeNode>> currentNodesByProfileKey = new(StringComparer.OrdinalIgnoreCase);
+		private readonly Dictionary<string, VPTree<AnchorContext>> currentTreesByProfileKey = new(StringComparer.OrdinalIgnoreCase);
 
+		private const string LangGql = "gql";
+		private const string LangTs = "ts";
+
+		private const string AnchorFamilyCallable = "callableMember";
+		private const string AnchorFamilyRecord = "recordLike";
+
+		private const string AnchorKindGqlField = "gqlField";
+		private const string AnchorKindGqlType = "gqlTypeDef";
+		private const string AnchorKindGqlInput = "gqlInputDef";
+		private const string AnchorKindGqlInterface = "gqlInterfaceDef";
+		private const string AnchorKindTs = "tsMember";
 
 		private static TreeNodeClientV2 ToClientNodeV2(TreeNode n)
 		{
