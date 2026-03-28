@@ -14,33 +14,8 @@ namespace MarkupServer
 			if (string.IsNullOrWhiteSpace(currentFolderPath))
 				throw new InvalidOperationException("currentFolderPath is empty. Call land/listAnchors first.");
 
-			currentContextsByProfileKey.Clear();
-			currentNodesByProfileKey.Clear();
-			currentTreesByProfileKey.Clear();
-
 			BuildSemanticMarkupFromDisk(out var gqlAnchors, out var tsAnchors);
-			var allAnchors = gqlAnchors.Concat(tsAnchors).Where(CanParticipateInRebinding).ToList();
-
-			foreach (var grp in allAnchors.GroupBy(GetProfileKey, StringComparer.OrdinalIgnoreCase))
-			{
-				var nodes = grp.Select(CloneAnchor).ToList();
-				var contexts = nodes.Select(BuildAnchorContext).Where(x => x != null).ToList();
-				currentNodesByProfileKey[grp.Key] = nodes;
-				currentContextsByProfileKey[grp.Key] = contexts;
-				if (contexts.Count == 0)
-					continue;
-
-				var weights = GetWeightsForProfileKey(grp.Key);
-				var tree = new VPTree<AnchorContext>(
-					contexts,
-					(a, b) => AnchorContextDistance(a, b, weights),
-					42,
-					Tracing.Tracer);
-
-				currentTreesByProfileKey[grp.Key] = tree;
-
-				Debug($"[vptree] built profile={grp.Key}, size={contexts.Count}, depth={tree.BuildDepth}");
-			}
+			LoadRebindingForestsFromAnchors(gqlAnchors.Concat(tsAnchors));
 		}
 
 		[JsonRpcMethod("land/updateAnchor", UseSingleObjectParameterDeserialization = true)]
@@ -93,6 +68,7 @@ namespace MarkupServer
 
 			var updated = CloneAnchor(newNode);
 			updated.Id = p.anchorId;
+			updated.IsManual = oldNode.IsManual;
 			updated.AnchorFamily = EnsureAnchorFamily(updated);
 
 			var isGql = string.Equals(updated.Language, LangGql, StringComparison.OrdinalIgnoreCase);
@@ -108,6 +84,7 @@ namespace MarkupServer
 				lock (markupLock)
 				{
 					ReplaceAnchorInMarkupUnsafe(updated);
+					RebuildRelationsUnsafe();
 					RebuildMarkupRootsUnsafe();
 					ReloadNodesByIdUnsafe();
 					if (!AnchorStore.TrySave(currentFolderPath, currentMarkup, out var err))

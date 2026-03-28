@@ -89,6 +89,14 @@ namespace MarkupServer
 				fn = fieldGroupName,
 			};
 
+		private static AddAnchorResultV2 MakeAddAnchorResult(TreeNode node, bool? alreadyExists = null, string message = null)
+			=> new AddAnchorResultV2
+			{
+				a = ToClientNodeV2(node),
+				ex = alreadyExists,
+				m = message,
+			};
+
 		[JsonRpcMethod("shutdown")]
 		public Task ShutdownAsync() => Task.CompletedTask;
 

@@ -250,6 +250,7 @@ namespace MarkupServer
 				Id = n.Id,
 				Name = n.Name,
 				NodeType = n.NodeType,
+				IsManual = n.IsManual,
 				Filepath = n.Filepath,
 				StartOffset = n.StartOffset,
 				EndOffset = n.EndOffset,
@@ -307,6 +308,250 @@ namespace MarkupServer
 				return displayName[(firstSpace + 1)..];
 
 			return displayName;
+		}
+
+
+		private sealed class GqlBindableCandidate
+		{
+			public Node Node { get; set; }
+			public string ParentTypeName { get; set; }
+			public string GqlTypeKind { get; set; }
+			public int Specificity { get; set; }
+		}
+
+		private sealed class TsBindableCandidate
+		{
+			public Node Node { get; set; }
+			public string ParentName { get; set; }
+			public int Specificity { get; set; }
+		}
+
+		private static bool ContainsOffset(Node n, int offset)
+		{
+			if (n?.Location == null)
+				return false;
+
+			return n.Location.Start.Offset <= offset && offset <= n.Location.End.Offset;
+		}
+
+		private TreeNode FindEquivalentAnchorInMarkupUnsafe(TreeNode candidate)
+		{
+			if (candidate == null)
+				return null;
+
+			foreach (var existing in currentMarkup?.Anchors ?? new List<TreeNode>())
+			{
+				if (existing == null || !string.Equals(existing.NodeType, "anchor", StringComparison.OrdinalIgnoreCase))
+					continue;
+
+				if (!string.Equals(existing.Language, candidate.Language, StringComparison.OrdinalIgnoreCase))
+					continue;
+				if (!string.Equals(existing.AnchorKind, candidate.AnchorKind, StringComparison.OrdinalIgnoreCase))
+					continue;
+				if (!string.Equals(Path.GetFullPath(existing.Filepath ?? ""), Path.GetFullPath(candidate.Filepath ?? ""), StringComparison.OrdinalIgnoreCase))
+					continue;
+
+				if ((existing.StartOffset ?? -1) == (candidate.StartOffset ?? -2) && (existing.EndOffset ?? -1) == (candidate.EndOffset ?? -2))
+					return existing;
+
+				if (string.Equals(existing.MethodNameNorm ?? "", candidate.MethodNameNorm ?? "", StringComparison.Ordinal)
+					&& string.Equals(existing.ParentNameNorm ?? "", candidate.ParentNameNorm ?? "", StringComparison.Ordinal))
+					return existing;
+			}
+
+			return null;
+		}
+
+		private void RebuildRelationsUnsafe()
+		{
+			currentMarkup ??= new PersistedMarkup();
+			currentMarkup.Anchors ??= new List<TreeNode>();
+
+			var gqlAnchors = currentMarkup.Anchors
+				.Where(x => x != null && string.Equals(x.Language, LangGql, StringComparison.OrdinalIgnoreCase))
+				.Select(CloneAnchor)
+				.ToList();
+			var tsAnchors = currentMarkup.Anchors
+				.Where(x => x != null && string.Equals(x.Language, LangTs, StringComparison.OrdinalIgnoreCase))
+				.Select(CloneAnchor)
+				.ToList();
+
+			currentMarkup.Relations = BuildRelations(gqlAnchors, tsAnchors);
+		}
+
+		private TreeNode TryCreateManualAnchorAtOffset(string filePath, int offset, out string message)
+		{
+			message = null;
+			filePath = Path.GetFullPath(filePath ?? "");
+			if (!File.Exists(filePath))
+			{
+				message = $"Файл не найден: {filePath}";
+				return null;
+			}
+
+			var ext = Path.GetExtension(filePath) ?? "";
+			if (string.Equals(ext, ".graphql", StringComparison.OrdinalIgnoreCase) || string.Equals(ext, ".gql", StringComparison.OrdinalIgnoreCase))
+				return TryCreateBindableGqlAnchorAtOffset(filePath, offset, out message);
+			if (string.Equals(ext, ".ts", StringComparison.OrdinalIgnoreCase))
+				return TryCreateBindableTsAnchorAtOffset(filePath, offset, out message);
+
+			message = "Ручное добавление точки поддерживается только для GraphQL и TypeScript (*.ts) файлов.";
+			return null;
+		}
+
+		private TreeNode TryCreateBindableGqlAnchorAtOffset(string filePath, int offset, out string message)
+		{
+			message = null;
+
+			var txt = File.ReadAllText(filePath);
+			var root = graphqlParser.Parse(txt).Item1;
+			if (root == null)
+			{
+				message = "Не удалось распарсить файл GraphQL.";
+				return null;
+			}
+
+			var candidates = new List<GqlBindableCandidate>();
+			foreach (var typeDef in GetGqlTypeDefs(root))
+			{
+				if (!ContainsOffset(typeDef, offset))
+					continue;
+
+				var gqlTypeKind = InferGqlTypeKind(typeDef);
+				var typeName = GetGqlTypeName(typeDef);
+
+				candidates.Add(new GqlBindableCandidate
+				{
+					Node = typeDef,
+					ParentTypeName = typeName,
+					GqlTypeKind = gqlTypeKind,
+					Specificity = 1,
+				});
+
+				foreach (var fieldNode in GetGqlFieldNodes(typeDef))
+				{
+					if (!ContainsOffset(fieldNode, offset))
+						continue;
+
+					candidates.Add(new GqlBindableCandidate
+					{
+						Node = fieldNode,
+						ParentTypeName = typeName,
+						GqlTypeKind = gqlTypeKind,
+						Specificity = 2,
+					});
+				}
+			}
+
+			var best = candidates
+				.Where(x => x?.Node?.Location != null)
+				.OrderBy(x => (x.Node.Location.End.Offset - x.Node.Location.Start.Offset))
+				.ThenByDescending(x => x.Specificity)
+				.FirstOrDefault();
+
+			if (best == null)
+			{
+				message = "В позиции курсора не найдена bindable-сущность GraphQL (поддерживаются только type_def и func_line).";
+				return null;
+			}
+
+			if (string.Equals(best.Node.ToString(), "func_line", StringComparison.OrdinalIgnoreCase))
+				return GetTreeNodeFromGqlFieldNode(best.Node, filePath, best.ParentTypeName, best.GqlTypeKind);
+
+			return GetTreeNodeFromGqlTypeNode(best.Node, filePath, best.GqlTypeKind, txt);
+		}
+
+		private TreeNode TryCreateBindableTsAnchorAtOffset(string filePath, int offset, out string message)
+		{
+			message = null;
+
+			var root = typescriptParser.Parse(File.ReadAllText(filePath)).Item1;
+			if (root == null)
+			{
+				message = "Не удалось распарсить файл TypeScript.";
+				return null;
+			}
+
+			var candidates = new List<TsBindableCandidate>();
+			CollectTsBindableCandidatesAtOffset(root, offset, candidates);
+
+			var best = candidates
+				.Where(x => x?.Node?.Location != null)
+				.OrderBy(x => (x.Node.Location.End.Offset - x.Node.Location.Start.Offset))
+				.ThenByDescending(x => x.Specificity)
+				.FirstOrDefault();
+
+			if (best == null)
+			{
+				message = "В позиции курсора не найдена bindable-сущность TypeScript (поддерживаются func, sub_field_func_impl и sub_field_any).";
+				return null;
+			}
+
+			return GetTreeNodeFromTsNode(best.Node, filePath, best.ParentName);
+		}
+
+		private void LoadRebindingForestsFromAnchors(IEnumerable<TreeNode> anchors)
+		{
+			currentContextsByProfileKey.Clear();
+			currentNodesByProfileKey.Clear();
+			currentTreesByProfileKey.Clear();
+
+			var allAnchors = (anchors ?? Enumerable.Empty<TreeNode>())
+				.Where(CanParticipateInRebinding)
+				.Select(CloneAnchor)
+				.ToList();
+
+			foreach (var grp in allAnchors.GroupBy(GetProfileKey, StringComparer.OrdinalIgnoreCase))
+			{
+				var nodes = grp.Select(CloneAnchor).ToList();
+				var contexts = nodes.Select(BuildAnchorContext).Where(x => x != null).ToList();
+				currentNodesByProfileKey[grp.Key] = nodes;
+				currentContextsByProfileKey[grp.Key] = contexts;
+				if (contexts.Count == 0)
+					continue;
+
+				var weights = GetWeightsForProfileKey(grp.Key);
+				var tree = new VPTree<AnchorContext>(
+					contexts,
+					(a, b) => AnchorContextDistance(a, b, weights),
+					42,
+					Tracing.Tracer);
+
+				currentTreesByProfileKey[grp.Key] = tree;
+				Debug($"[vptree] built profile={grp.Key}, size={contexts.Count}, depth={tree.BuildDepth}");
+			}
+		}
+
+		private TreeNode RebindAnchorAgainstCurrentForests(TreeNode oldNode)
+		{
+			if (oldNode == null)
+				return null;
+
+			EnsureAnchorFamily(oldNode);
+			var profileKey = GetProfileKey(oldNode);
+			if (string.IsNullOrWhiteSpace(profileKey))
+				return null;
+
+			if (!currentTreesByProfileKey.TryGetValue(profileKey, out var tree)
+				|| !currentContextsByProfileKey.TryGetValue(profileKey, out var contexts)
+				|| !currentNodesByProfileKey.TryGetValue(profileKey, out var nodes)
+				|| contexts.Count == 0)
+				return null;
+
+			var query = BuildAnchorContext(oldNode);
+			if (query == null)
+				return null;
+
+			var cands = tree.KNearest(query, 1);
+			if (cands == null || cands.Count == 0)
+				return null;
+
+			var best = cands[0];
+			var rebound = CloneAnchor(nodes[best.Index]);
+			rebound.Id = oldNode.Id;
+			rebound.IsManual = oldNode.IsManual;
+			rebound.AnchorFamily = EnsureAnchorFamily(rebound);
+			return rebound;
 		}
 
 		private TreeNode GetTreeNodeFromTsNode(Node n, string filepath, string parentName)
@@ -610,6 +855,71 @@ namespace MarkupServer
 
 			foreach (var child in root.Children ?? new List<Node>())
 				CollectTsNodes(child, res, nextResolverParent, nextLexicalContainer);
+		}
+
+		private void CollectTsBindableCandidatesAtOffset(Node root, int offset, List<TsBindableCandidate> res, string resolverParent = null, string lexicalContainer = null)
+		{
+			if (root == null || res == null || !ContainsOffset(root, offset))
+				return;
+
+			var nodeName = root.ToString();
+			var nextResolverParent = resolverParent;
+			var nextLexicalContainer = lexicalContainer;
+
+			if (nodeName == "field_block")
+			{
+				var blockName = ExtractTsNodeId(root);
+				if (!string.IsNullOrWhiteSpace(blockName))
+				{
+					nextResolverParent = blockName;
+					nextLexicalContainer = blockName;
+				}
+			}
+			else if (nodeName == "class")
+			{
+				var className = root.Children != null && root.Children.Count > 1
+					? ExtractTsNodeId(root.Children[1])
+					: ExtractTsNodeId(root);
+				if (!string.IsNullOrWhiteSpace(className))
+				{
+					nextResolverParent = className;
+					nextLexicalContainer = className;
+				}
+			}
+			else if (nodeName == "struct" || nodeName == "lamda_struct")
+			{
+				var containerName = root.Children != null && root.Children.Count > 1
+					? ExtractTsNodeId(root.Children[1])
+					: ExtractTsNodeId(root);
+				if (!string.IsNullOrWhiteSpace(containerName))
+					nextLexicalContainer = containerName;
+			}
+			else if (nodeName == "namespace")
+			{
+				var namespaceName = root.Children != null && root.Children.Count > 1
+					? ExtractTsNodeId(root.Children[1])
+					: ExtractTsNodeId(root);
+				if (!string.IsNullOrWhiteSpace(namespaceName) && string.IsNullOrWhiteSpace(nextLexicalContainer))
+					nextLexicalContainer = namespaceName;
+			}
+
+			if (IsTsCallableNode(nodeName))
+			{
+				var effectiveParent = nextResolverParent;
+				if (string.IsNullOrWhiteSpace(effectiveParent))
+					effectiveParent = InferResolverParentFromContainerName(nextLexicalContainer);
+
+				res.Add(new TsBindableCandidate
+				{
+					Node = root,
+					ParentName = effectiveParent,
+					Specificity = 1,
+				});
+				return;
+			}
+
+			foreach (var child in root.Children ?? new List<Node>())
+				CollectTsBindableCandidatesAtOffset(child, offset, res, nextResolverParent, nextLexicalContainer);
 		}
 
 		private Dictionary<string, List<Node>> GetTsNodes(Node root)

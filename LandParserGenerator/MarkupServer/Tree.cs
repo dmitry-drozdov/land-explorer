@@ -23,6 +23,7 @@ namespace MarkupServer
 		public int? EndOffset { get; set; }
 
 		// внутренние поля (нужны для updateAnchor / метрик, но не отдаются в плагин)
+		public bool IsManual { get; set; }
 		public string Language { get; set; }
 		public string AnchorKind { get; set; }
 		public string AnchorFamily { get; set; }
@@ -89,4 +90,18 @@ namespace MarkupServer
 	}
 
 	public class UpdateAnchorParams { public string anchorId { get; set; } }
+
+	public class AddAnchorParams
+	{
+		public string filePath { get; set; }
+		public int offset { get; set; }
+	}
+
+	public class AddAnchorResultV2
+	{
+		public TreeNodeClientV2 a { get; set; }
+		public bool? ex { get; set; }
+		public string m { get; set; }
+	}
+
 }

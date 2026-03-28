@@ -41,15 +41,50 @@ namespace MarkupServer
 					Debug($"[listAnchors] cache load failed: {err}");
 			}
 
+			AnchorStore.TryLoad(currentFolderPath, out var previousMarkup, out var previousErr);
+
 			BuildSemanticMarkupFromDisk(out var gqlAnchors, out var tsAnchors);
-			var relations = BuildRelations(gqlAnchors, tsAnchors);
-			Debug($"gqlAnchors={gqlAnchors.Count}, tsAnchors={tsAnchors.Count}, relations={relations.Count}");
+			var autoAnchors = gqlAnchors.Select(CloneAnchor).Concat(tsAnchors.Select(CloneAnchor)).ToList();
+
+			var preservedManualAnchors = new List<TreeNode>();
+			var previousManualAnchors = (previousMarkup?.Anchors ?? new List<TreeNode>())
+				.Where(x => x != null && x.IsManual)
+				.Select(CloneAnchor)
+				.ToList();
+
+			if (previousManualAnchors.Count > 0)
+			{
+				LoadRebindingForestsFromAnchors(autoAnchors);
+				foreach (var manual in previousManualAnchors)
+				{
+					var rebound = RebindAnchorAgainstCurrentForests(manual) ?? CloneAnchor(manual);
+					rebound.IsManual = true;
+
+					var duplicate = autoAnchors.Concat(preservedManualAnchors)
+						.FirstOrDefault(x =>
+							x != null
+							&& string.Equals(x.Language, rebound.Language, StringComparison.OrdinalIgnoreCase)
+							&& string.Equals(x.AnchorKind, rebound.AnchorKind, StringComparison.OrdinalIgnoreCase)
+							&& string.Equals(Path.GetFullPath(x.Filepath ?? ""), Path.GetFullPath(rebound.Filepath ?? ""), StringComparison.OrdinalIgnoreCase)
+							&& (x.StartOffset ?? -1) == (rebound.StartOffset ?? -2)
+							&& (x.EndOffset ?? -1) == (rebound.EndOffset ?? -2));
+
+					if (duplicate == null)
+						preservedManualAnchors.Add(rebound);
+				}
+			}
+
+			var allAnchors = autoAnchors.Concat(preservedManualAnchors).ToList();
+			var relations = BuildRelations(
+				allAnchors.Where(x => x != null && string.Equals(x.Language, LangGql, StringComparison.OrdinalIgnoreCase)).ToList(),
+				allAnchors.Where(x => x != null && string.Equals(x.Language, LangTs, StringComparison.OrdinalIgnoreCase)).ToList());
+			Debug($"gqlAnchors={gqlAnchors.Count}, tsAnchors={tsAnchors.Count}, manualAnchors={preservedManualAnchors.Count}, relations={relations.Count}");
 
 			lock (markupLock)
 			{
 				currentMarkup = new PersistedMarkup
 				{
-					Anchors = gqlAnchors.Select(CloneAnchor).Concat(tsAnchors.Select(CloneAnchor)).ToList(),
+					Anchors = allAnchors,
 					Relations = relations,
 				};
 				RebuildMarkupRootsUnsafe();
