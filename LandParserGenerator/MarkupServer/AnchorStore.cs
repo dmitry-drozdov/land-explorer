@@ -15,7 +15,7 @@ namespace MarkupServer
 	/// </summary>
 	internal static class AnchorStore
 	{
-		public const int CurrentVersion = 5;
+		public const int CurrentVersion = 6;
 		private const string FolderName = ".land";
 		private const string FileName = "anchors.json";
 
@@ -59,11 +59,12 @@ namespace MarkupServer
 						EnsureAnchorSemantics(anchor);
 					parsed.Relations ??= DeriveRelationsFromRoots(parsed.Roots);
 					parsed.Roots ??= new List<TreeNode>();
+					parsed.SuppressedAnchorKeys ??= new List<string>();
 					data = parsed;
 					return true;
 				}
 
-				if (version == 2 || version == 3 || version == 4)
+				if (version == 2 || version == 3 || version == 4 || version == 5)
 				{
 					var legacy = jo.ToObject<PersistedMarkup>();
 					if (legacy == null)
@@ -85,6 +86,7 @@ namespace MarkupServer
 						Roots = roots,
 						Anchors = anchors,
 						Relations = legacy.Relations ?? DeriveRelationsFromRoots(roots),
+						SuppressedAnchorKeys = legacy.SuppressedAnchorKeys ?? new List<string>(),
 					};
 					return true;
 				}
@@ -118,6 +120,7 @@ namespace MarkupServer
 					EnsureAnchorSemantics(anchor);
 				data.Relations ??= new List<PersistedRelation>();
 				data.Roots ??= new List<TreeNode>();
+				data.SuppressedAnchorKeys ??= new List<string>();
 
 				var json = JsonConvert.SerializeObject(
 					data,
@@ -273,5 +276,6 @@ namespace MarkupServer
 		public List<TreeNode> Roots { get; set; } = new();
 		public List<TreeNode> Anchors { get; set; } = new();
 		public List<PersistedRelation> Relations { get; set; } = new();
+		public List<string> SuppressedAnchorKeys { get; set; } = new();
 	}
 }

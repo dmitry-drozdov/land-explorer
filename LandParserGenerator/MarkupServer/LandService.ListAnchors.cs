@@ -42,14 +42,18 @@ namespace MarkupServer
 			}
 
 			AnchorStore.TryLoad(currentFolderPath, out var previousMarkup, out var previousErr);
+			var suppressed = GetSuppressedKeysSet(previousMarkup);
 
 			BuildSemanticMarkupFromDisk(out var gqlAnchors, out var tsAnchors);
-			var autoAnchors = gqlAnchors.Select(CloneAnchor).Concat(tsAnchors.Select(CloneAnchor)).ToList();
+			var autoAnchors = gqlAnchors.Select(CloneAnchor).Concat(tsAnchors.Select(CloneAnchor))
+				.Where(x => !IsSuppressed(x, suppressed))
+				.ToList();
 
 			var preservedManualAnchors = new List<TreeNode>();
 			var previousManualAnchors = (previousMarkup?.Anchors ?? new List<TreeNode>())
 				.Where(x => x != null && x.IsManual)
 				.Select(CloneAnchor)
+				.Where(x => !IsSuppressed(x, suppressed))
 				.ToList();
 
 			if (previousManualAnchors.Count > 0)
@@ -59,6 +63,8 @@ namespace MarkupServer
 				{
 					var rebound = RebindAnchorAgainstCurrentForests(manual) ?? CloneAnchor(manual);
 					rebound.IsManual = true;
+					if (IsSuppressed(rebound, suppressed))
+						continue;
 
 					var duplicate = autoAnchors.Concat(preservedManualAnchors)
 						.FirstOrDefault(x =>
@@ -86,6 +92,7 @@ namespace MarkupServer
 				{
 					Anchors = allAnchors,
 					Relations = relations,
+					SuppressedAnchorKeys = suppressed.ToList(),
 				};
 				RebuildMarkupRootsUnsafe();
 				ReloadNodesByIdUnsafe();

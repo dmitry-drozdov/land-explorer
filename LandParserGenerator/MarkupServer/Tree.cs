@@ -105,6 +105,18 @@ namespace MarkupServer
 		public string m { get; set; }
 	}
 
+
+	public class DeleteAnchorParams
+	{
+		public string anchorId { get; set; }
+	}
+
+	public class DeleteAnchorResultV2
+	{
+		public bool? d { get; set; }
+		public string m { get; set; }
+	}
+
 	public class ParentRebindOptionsParams
 	{
 		public string anchorId { get; set; }

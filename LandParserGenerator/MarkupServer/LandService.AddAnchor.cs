@@ -38,6 +38,8 @@ namespace MarkupServer
 			{
 				currentMarkup ??= new PersistedMarkup();
 				currentMarkup.Anchors ??= new System.Collections.Generic.List<TreeNode>();
+				currentMarkup.SuppressedAnchorKeys ??= new System.Collections.Generic.List<string>();
+				RemoveSuppressionForNodeUnsafe(candidate);
 
 				var existing = FindEquivalentAnchorInMarkupUnsafe(candidate);
 				if (existing != null)
