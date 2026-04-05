@@ -60,6 +60,7 @@ namespace MarkupServer
 				c.f = n.Filepath;
 				c.s = n.StartOffset;
 				c.e = n.EndOffset;
+				c.k = n.AnchorKind;
 			}
 
 			if (n.Children != null && n.Children.Count > 0)

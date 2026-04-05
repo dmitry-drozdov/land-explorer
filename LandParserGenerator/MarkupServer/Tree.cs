@@ -61,6 +61,7 @@ namespace MarkupServer
 		public string f { get; set; }
 		public int? s { get; set; }
 		public int? e { get; set; }
+		public string k { get; set; }
 	}
 
 	public class ListTreeResultV2
@@ -101,6 +102,38 @@ namespace MarkupServer
 	{
 		public TreeNodeClientV2 a { get; set; }
 		public bool? ex { get; set; }
+		public string m { get; set; }
+	}
+
+	public class ParentRebindOptionsParams
+	{
+		public string anchorId { get; set; }
+	}
+
+	public class ParentRebindTargetDescriptor
+	{
+		public string filePath { get; set; }
+		public int? startOffset { get; set; }
+		public int? endOffset { get; set; }
+		public string anchorKind { get; set; }
+	}
+
+	public class ParentRebindApplyParams
+	{
+		public string anchorId { get; set; }
+		public ParentRebindTargetDescriptor target { get; set; }
+	}
+
+	public class ParentRebindOptionV2
+	{
+		public TreeNodeClientV2 n { get; set; }
+		public bool? c { get; set; }
+	}
+
+	public class ParentRebindOptionsResultV2
+	{
+		public TreeNodeClientV2 e { get; set; }
+		public List<ParentRebindOptionV2> o { get; set; }
 		public string m { get; set; }
 	}
 
