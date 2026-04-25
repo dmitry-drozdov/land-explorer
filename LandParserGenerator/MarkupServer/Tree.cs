@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace MarkupServer
@@ -36,6 +37,14 @@ namespace MarkupServer
 		public List<Arg> Args { get; set; }
 		public int? OrdinalInParent { get; set; }
 		public Dictionary<string, double> NeighborBag { get; set; }
+
+		// Только для shadow-узлов внутри user-групп: исходный AnchorId, на который ссылается тень.
+		// Не сериализуется в snapshot — заполняется только в материализованных Roots.
+		// На клиент уходит как поле `aid` в TreeNodeClientV2.
+		public string RealAnchorId { get; set; }
+		// Только для group-узлов: "auto" (по умолчанию для совместимости) или "user".
+		// На клиент уходит как поле `gk` в TreeNodeClientV2.
+		public string GroupKind { get; set; }
 	}
 
 	/// <summary>
@@ -62,6 +71,11 @@ namespace MarkupServer
 		public int? s { get; set; }
 		public int? e { get; set; }
 		public string k { get; set; }
+
+		/// <summary>Group kind: "auto" (default, omitted) или "user" — отличает пользовательские группы от автогрупп.</summary>
+		public string gk { get; set; }
+		/// <summary>Real anchor id для shadow-узла (anchor внутри user-группы). Если null — узел канонический.</summary>
+		public string aid { get; set; }
 	}
 
 	public class ListTreeResultV2
@@ -147,6 +161,81 @@ namespace MarkupServer
 		public TreeNodeClientV2 e { get; set; }
 		public List<ParentRebindOptionV2> o { get; set; }
 		public string m { get; set; }
+	}
+
+	// =========================================================================
+	// User-группы (этап 1): персистентные пользовательские "папки", в которые
+	// можно класть один и тот же якорь несколько раз.
+	// =========================================================================
+
+	/// <summary>
+	/// Внутренняя модель пользовательской группы. Сохраняется в snapshot.
+	/// </summary>
+	public class UserGroup
+	{
+		public string Id { get; set; }                  // "userGroup:" + GUID
+		public string Name { get; set; }
+		public string ParentGroupId { get; set; }       // зарезервировано; сейчас всегда null
+		public int? Order { get; set; }                 // сортировка соседей; null = по имени
+		public DateTime CreatedAtUtc { get; set; }
+		public DateTime UpdatedAtUtc { get; set; }
+	}
+
+	/// <summary>
+	/// Запись о принадлежности якоря к user-группе. Один якорь может состоять
+	/// в нескольких группах; в одной группе один якорь — один раз.
+	/// </summary>
+	public class UserGroupMembership
+	{
+		public string GroupId { get; set; }
+		public string AnchorId { get; set; }
+		public int? Order { get; set; }                 // сортировка внутри группы; null = по имени якоря
+		public DateTime AddedAtUtc { get; set; }
+	}
+
+	// ----- Params/Result DTO для RPC user-групп -----
+
+	public class CreateUserGroupParams
+	{
+		public string name { get; set; }
+		public string parentGroupId { get; set; }       // зарезервировано; сейчас игнорируется
+	}
+
+	public class RenameUserGroupParams
+	{
+		public string groupId { get; set; }
+		public string name { get; set; }
+	}
+
+	public class DeleteUserGroupParams
+	{
+		public string groupId { get; set; }
+	}
+
+	public class AddAnchorToGroupParams
+	{
+		public string anchorId { get; set; }
+		public string groupId { get; set; }
+	}
+
+	public class RemoveAnchorFromGroupParams
+	{
+		public string anchorId { get; set; }
+		public string groupId { get; set; }
+	}
+
+	public class UserGroupResultV2
+	{
+		public TreeNodeClientV2 g { get; set; }         // user-группа в форме TreeNodeClientV2 (gk="user")
+		public string m { get; set; }
+	}
+
+	public class UserGroupSimpleResultV2
+	{
+		public bool? ok { get; set; }
+		public string m { get; set; }
+		public bool? alreadyMember { get; set; }        // только для add — уже состоит в группе
+		public int? removedMemberships { get; set; }    // только для delete группы — сколько связок упало
 	}
 
 }

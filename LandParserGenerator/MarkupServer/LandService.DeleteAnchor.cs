@@ -103,15 +103,25 @@ namespace MarkupServer
 			effectiveNode.IsManual = oldNode.IsManual;
 			effectiveNode.AnchorFamily = EnsureAnchorFamily(effectiveNode);
 
+			int cascadedMemberships = 0;
 			lock (markupLock)
 			{
 				currentMarkup ??= new PersistedMarkup();
 				currentMarkup.Anchors ??= new List<TreeNode>();
 				currentMarkup.SuppressedAnchorKeys ??= new List<string>();
+				currentMarkup.Memberships ??= new List<UserGroupMembership>();
 
 				currentMarkup.Anchors = currentMarkup.Anchors
 					.Where(x => !string.Equals(x?.Id, p.anchorId, StringComparison.OrdinalIgnoreCase))
 					.ToList();
+
+				// Каскад: убираем все memberships удалённого якоря.
+				var beforeMembers = currentMarkup.Memberships.Count;
+				currentMarkup.Memberships = currentMarkup.Memberships
+					.Where(m => !string.Equals(m?.AnchorId, p.anchorId, StringComparison.OrdinalIgnoreCase))
+					.ToList();
+				cascadedMemberships = beforeMembers - currentMarkup.Memberships.Count;
+
 				AddSuppressionForNodeUnsafe(effectiveNode);
 				RebuildRelationsUnsafe();
 				RebuildMarkupRootsUnsafe();
@@ -120,7 +130,7 @@ namespace MarkupServer
 					Debug($"[deleteAnchor] cannot save anchors cache: {err}");
 			}
 
-			Debug($"[deleteAnchor] deleted anchor {p.anchorId}; suppressed={BuildSuppressKey(effectiveNode)}");
+			Debug($"[deleteAnchor] deleted anchor {p.anchorId}; suppressed={BuildSuppressKey(effectiveNode)}; cascadedMemberships={cascadedMemberships}");
 			return Task.FromResult(MakeDeleteAnchorResult(true, "Точка удалена из разметки."));
 		}
 	}

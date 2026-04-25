@@ -1022,6 +1022,31 @@ namespace MarkupServer
 			var allAnchors = markup.Anchors.Where(x => x != null && string.Equals(x.NodeType, "anchor", StringComparison.OrdinalIgnoreCase)).ToList();
 			foreach (var anchor in allAnchors)
 				EnsureAnchorFamily(anchor);
+
+			// Индексы для дополнения групп shadow-узлами из Memberships.
+			var anchorsById = new Dictionary<string, TreeNode>(StringComparer.OrdinalIgnoreCase);
+			foreach (var a in allAnchors)
+				if (!string.IsNullOrWhiteSpace(a?.Id))
+					anchorsById[a.Id] = a;
+
+			var membershipsByGroup = new Dictionary<string, List<UserGroupMembership>>(StringComparer.OrdinalIgnoreCase);
+			foreach (var m in markup.Memberships ?? new List<UserGroupMembership>())
+			{
+				if (m == null || string.IsNullOrWhiteSpace(m.GroupId) || string.IsNullOrWhiteSpace(m.AnchorId))
+					continue;
+				if (!membershipsByGroup.TryGetValue(m.GroupId, out var bucket))
+					membershipsByGroup[m.GroupId] = bucket = new List<UserGroupMembership>();
+				bucket.Add(m);
+			}
+
+			// User-группы рендерятся ПЕРЕД auto-группами, чтобы пользовательская
+			// организация была сразу видна сверху. Якоря в user-группах рендерятся
+			// как shadow-узлы (Id = memberOf:groupId::anchorId, RealAnchorId = anchorId)
+			// — это нужно для корректной работы treeView.reveal() при multi-membership.
+			var userRoots = BuildUserGroupRoots(markup, anchorsById, membershipsByGroup);
+			if (userRoots.Count > 0)
+				result.AddRange(userRoots);
+
 			var gqlAnchors = allAnchors.Where(x => string.Equals(x.Language, LangGql, StringComparison.OrdinalIgnoreCase)).ToList();
 			var tsAnchors = allAnchors.Where(x => string.Equals(x.Language, LangTs, StringComparison.OrdinalIgnoreCase)).ToDictionary(x => x.Id, x => x, StringComparer.OrdinalIgnoreCase);
 
@@ -1087,8 +1112,14 @@ namespace MarkupServer
 					if (relationMap.TryGetValue(fieldAnchor.Id, out var tsRelated))
 						fieldGroup.Children.AddRange(tsRelated.Select(CloneAnchor));
 
+					// Дополнение пользовательскими memberships в этой gqlField-группе.
+					AppendMembershipShadows(fieldGroup, anchorsById, membershipsByGroup);
+
 					groupNode.Children.Add(fieldGroup);
 				}
+
+				// Дополнение пользовательскими memberships на уровне gqlType-группы.
+				AppendMembershipShadows(groupNode, anchorsById, membershipsByGroup);
 
 				result.Add(groupNode);
 			}
@@ -1111,16 +1142,112 @@ namespace MarkupServer
 
 				foreach (var grp in orphanTs.GroupBy(x => x.ParentNameRaw ?? "(root)").OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase))
 				{
-					orphanRoot.Children.Add(new TreeNode
+					var classNode = new TreeNode
 					{
 						Id = MakeGroupId("tsClass", grp.Key, currentFolderPath ?? ""),
 						Name = grp.Key,
 						NodeType = "group",
 						Children = grp.Select(CloneAnchor).ToList(),
-					});
+					};
+					AppendMembershipShadows(classNode, anchorsById, membershipsByGroup);
+					orphanRoot.Children.Add(classNode);
 				}
 
+				AppendMembershipShadows(orphanRoot, anchorsById, membershipsByGroup);
 				result.Add(orphanRoot);
+			}
+
+			return result;
+		}
+
+		/// <summary>
+		/// Добавляет в Children группы shadow-узлы для всех memberships, у которых GroupId == groupNode.Id.
+		/// Дедуп: если канонический anchor с этим Id уже присутствует среди children — пропускаем.
+		/// </summary>
+		private void AppendMembershipShadows(
+			TreeNode groupNode,
+			Dictionary<string, TreeNode> anchorsById,
+			Dictionary<string, List<UserGroupMembership>> membershipsByGroup)
+		{
+			if (groupNode == null || string.IsNullOrWhiteSpace(groupNode.Id))
+				return;
+			if (!membershipsByGroup.TryGetValue(groupNode.Id, out var members) || members.Count == 0)
+				return;
+
+			groupNode.Children ??= new List<TreeNode>();
+
+			// Анкоры-каноны (без RealAnchorId), которые уже в группе — для дедупа.
+			var existingCanonicalIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+			foreach (var c in groupNode.Children)
+			{
+				if (c == null) continue;
+				if (string.Equals(c.NodeType, "anchor", StringComparison.OrdinalIgnoreCase)
+					&& string.IsNullOrEmpty(c.RealAnchorId)
+					&& !string.IsNullOrWhiteSpace(c.Id))
+				{
+					existingCanonicalIds.Add(c.Id);
+				}
+			}
+
+			var orderedMembers = members
+				.OrderBy(m => m.Order ?? int.MaxValue)
+				.ThenBy(m => anchorsById.TryGetValue(m.AnchorId, out var a) ? (a.Name ?? "") : "", StringComparer.OrdinalIgnoreCase)
+				.ToList();
+
+			foreach (var m in orderedMembers)
+			{
+				if (existingCanonicalIds.Contains(m.AnchorId))
+					continue; // уже есть канонически
+				if (!anchorsById.TryGetValue(m.AnchorId, out var canonical))
+					continue; // висячий — пропускаем
+
+				var shadow = CloneAnchor(canonical);
+				shadow.Id = MakeShadowAnchorId(groupNode.Id, canonical.Id);
+				shadow.RealAnchorId = canonical.Id;
+				groupNode.Children.Add(shadow);
+			}
+		}
+
+		private static string MakeShadowAnchorId(string groupId, string anchorId)
+			=> $"memberOf:{groupId}::{anchorId}";
+
+		/// <summary>
+		/// Построить TreeNode-узлы для всех пользовательских групп, со shadow-якорями
+		/// для каждого membership. Группы возвращаются в порядке (Order asc, Name asc).
+		/// Якоря внутри группы — в порядке (Order asc, Name asc).
+		/// Висячие memberships (anchorId не существует в Anchors) пропускаются молча
+		/// — это страховка; основная чистка делается в ListAnchors после сшивки и в
+		/// DeleteAnchor. Группы без members всё равно показываются (пустыми).
+		/// </summary>
+		private List<TreeNode> BuildUserGroupRoots(
+			PersistedMarkup markup,
+			Dictionary<string, TreeNode> anchorsById,
+			Dictionary<string, List<UserGroupMembership>> membershipsByGroup)
+		{
+			var result = new List<TreeNode>();
+			var groups = markup?.UserGroups;
+			if (groups == null || groups.Count == 0)
+				return result;
+
+			var orderedGroups = groups
+				.Where(g => g != null && !string.IsNullOrWhiteSpace(g.Id))
+				.OrderBy(g => g.Order ?? int.MaxValue)
+				.ThenBy(g => g.Name ?? "", StringComparer.OrdinalIgnoreCase)
+				.ToList();
+
+			foreach (var g in orderedGroups)
+			{
+				var groupNode = new TreeNode
+				{
+					Id = g.Id,
+					Name = string.IsNullOrWhiteSpace(g.Name) ? "(unnamed)" : g.Name,
+					NodeType = "group",
+					GroupKind = "user",
+					Children = new List<TreeNode>(),
+				};
+
+				AppendMembershipShadows(groupNode, anchorsById, membershipsByGroup);
+				result.Add(groupNode);
 			}
 
 			return result;
@@ -1214,6 +1341,284 @@ namespace MarkupServer
 					var norm = x.Replace('\\', '/').ToLowerInvariant();
 					return !norm.Contains("/vendor/") && !norm.Contains("/node_modules/") && !norm.Contains("/dist/");
 				});
+		}
+
+		// =================================================================
+		// Сшивка Id у auto-якорей при пересканировании.
+		//
+		// Цель: между двумя последовательными `listAnchors` сохранять Id
+		// у тех auto-якорей, чья семантическая идентичность не изменилась.
+		// Это предусловие для будущих user-групп / пользовательских ссылок,
+		// которые будут привязываться к стабильному `AnchorId`.
+		//
+		// Алгоритм двухслойный:
+		//   1) Точный матч по ключу (lang|kind|filepath|parent|method).
+		//      Покрывает рескан без правок и большинство мелких правок,
+		//      где имя/родитель/файл не поменялись (отступы, тело метода и т.п.).
+		//   2) VP-tree KNN на остатке. На MVP пороги по умолчанию = 0,
+		//      т.е. слой 2 фактически выключен. Параметры порогов
+		//      вынесены в `StitchSettings` и могут быть подняты позже.
+		// =================================================================
+
+		internal sealed class StitchSettings
+		{
+			/// <summary>Порог дистанции для callable-профилей (gqlField, tsMember). 0 = слой 2 выключен.</summary>
+			public double MaxDistanceCallable = 0.0;
+			/// <summary>Порог дистанции для record-профилей (gqlTypeDef, gqlInputDef, gqlInterfaceDef). 0 = слой 2 выключен.</summary>
+			public double MaxDistanceRecord = 0.0;
+
+			public static StitchSettings Default => new StitchSettings();
+
+			public double GetThreshold(string profileKey)
+			{
+				if (string.IsNullOrEmpty(profileKey)) return 0.0;
+				return profileKey.Contains($":{AnchorFamilyCallable}:", StringComparison.OrdinalIgnoreCase)
+					? MaxDistanceCallable
+					: MaxDistanceRecord;
+			}
+		}
+
+		internal sealed class StitchResult
+		{
+			public List<(string PrevId, string FreshIdReplaced)> MatchedExact { get; } = new();
+			public List<(string PrevId, string FreshIdReplaced, double Dist)> MatchedFuzzy { get; } = new();
+			public List<string> Lost { get; } = new();
+			public List<string> Fresh { get; } = new();
+
+			public int TotalMatched => MatchedExact.Count + MatchedFuzzy.Count;
+		}
+
+		private static string NormalizeStitchFilePath(string filePath)
+		{
+			var normalized = Path.GetFullPath(filePath ?? string.Empty).Replace('\\', '/');
+			return normalized.ToLowerInvariant();
+		}
+
+		private static string BuildStitchExactKey(TreeNode auto)
+		{
+			if (auto == null) return null;
+			if (!string.Equals(auto.NodeType, "anchor", StringComparison.OrdinalIgnoreCase)) return null;
+
+			var lang = (auto.Language ?? string.Empty).Trim().ToLowerInvariant();
+			var kind = (auto.AnchorKind ?? string.Empty).Trim();
+			var pathNorm = NormalizeStitchFilePath(auto.Filepath);
+			var method = auto.MethodNameNorm ?? string.Empty;
+			var parentRaw = auto.ParentNameRaw ?? string.Empty;
+
+			if (string.IsNullOrEmpty(lang) || string.IsNullOrEmpty(kind))
+				return null;
+
+			return $"{lang}|{kind}|{pathNorm}|{parentRaw}|{method}";
+		}
+
+		/// <summary>
+		/// Переписывает Id у новых auto-якорей так, чтобы они унаследовали Id
+		/// у соответствующих "старых" auto-якорей предыдущего snapshot-а.
+		/// Модифицирует <paramref name="freshAuto"/> на месте; возвращает статистику.
+		///
+		/// Manual-якоря не трогаем — у них своя ветка восстановления через
+		/// previousManualAnchors в <see cref="ListAnchorsAsync"/>.
+		/// </summary>
+		private StitchResult StitchAutoAnchorIdsFromPrevious(
+			IReadOnlyCollection<TreeNode> previousAuto,
+			IReadOnlyCollection<TreeNode> freshAuto,
+			StitchSettings settings = null)
+		{
+			settings ??= StitchSettings.Default;
+			var result = new StitchResult();
+
+			var prevList = (previousAuto ?? Array.Empty<TreeNode>())
+				.Where(x => x != null
+					&& string.Equals(x.NodeType, "anchor", StringComparison.OrdinalIgnoreCase)
+					&& !x.IsManual
+					&& !string.IsNullOrWhiteSpace(x.Id))
+				.ToList();
+			var freshList = (freshAuto ?? Array.Empty<TreeNode>())
+				.Where(x => x != null
+					&& string.Equals(x.NodeType, "anchor", StringComparison.OrdinalIgnoreCase)
+					&& !x.IsManual
+					&& !string.IsNullOrWhiteSpace(x.Id))
+				.ToList();
+
+			if (prevList.Count == 0)
+			{
+				foreach (var f in freshList) result.Fresh.Add(f.Id);
+				return result;
+			}
+
+			if (freshList.Count == 0)
+			{
+				foreach (var p in prevList) result.Lost.Add(p.Id);
+				return result;
+			}
+
+			// Чтобы корректно отслеживать "занятые" fresh-узлы после переименования Id —
+			// используем object identity, а не Id (Id меняется на месте).
+			var claimedFresh = new HashSet<TreeNode>();
+
+			// ---- Слой 1: точное совпадение ключа ----
+			var freshByKey = new Dictionary<string, List<TreeNode>>(StringComparer.Ordinal);
+			foreach (var f in freshList)
+			{
+				var key = BuildStitchExactKey(f);
+				if (key == null) continue;
+				if (!freshByKey.TryGetValue(key, out var bucket))
+					freshByKey[key] = bucket = new List<TreeNode>();
+				bucket.Add(f);
+			}
+
+			var unclaimedPrev = new List<TreeNode>();
+			foreach (var p in prevList)
+			{
+				var key = BuildStitchExactKey(p);
+				if (key == null || !freshByKey.TryGetValue(key, out var candidates) || candidates.Count == 0)
+				{
+					unclaimedPrev.Add(p);
+					continue;
+				}
+
+				TreeNode chosen = null;
+				var bestOffsetDelta = int.MaxValue;
+				foreach (var c in candidates)
+				{
+					if (claimedFresh.Contains(c)) continue;
+					var pStart = p.StartOffset ?? 0;
+					var cStart = c.StartOffset ?? 0;
+					var delta = Math.Abs(pStart - cStart);
+					if (delta < bestOffsetDelta)
+					{
+						bestOffsetDelta = delta;
+						chosen = c;
+					}
+				}
+
+				if (chosen == null)
+				{
+					unclaimedPrev.Add(p);
+					continue;
+				}
+
+				var replacedId = chosen.Id;
+				chosen.Id = p.Id;
+				claimedFresh.Add(chosen);
+				result.MatchedExact.Add((p.Id, replacedId));
+			}
+
+			// ---- Слой 2: VP-tree KNN на остатке ----
+			var unclaimedFresh = freshList.Where(x => !claimedFresh.Contains(x)).ToList();
+			var canFuzzyMatch = unclaimedPrev.Count > 0 && unclaimedFresh.Count > 0;
+
+			if (canFuzzyMatch)
+			{
+				// Леса по profileKey — каждый лес содержит только не занятые fresh-узлы.
+				var nodesByProfile = new Dictionary<string, List<TreeNode>>(StringComparer.OrdinalIgnoreCase);
+				var contextsByProfile = new Dictionary<string, List<AnchorContext>>(StringComparer.OrdinalIgnoreCase);
+
+				foreach (var f in unclaimedFresh)
+				{
+					if (!CanParticipateInRebinding(f)) continue;
+					var pk = GetProfileKey(f);
+					var ctx = BuildAnchorContext(f);
+					if (string.IsNullOrEmpty(pk) || ctx == null) continue;
+
+					if (!nodesByProfile.TryGetValue(pk, out var nl))
+					{
+						nodesByProfile[pk] = nl = new List<TreeNode>();
+						contextsByProfile[pk] = new List<AnchorContext>();
+					}
+					nl.Add(f);
+					contextsByProfile[pk].Add(ctx);
+				}
+
+				var treesByProfile = new Dictionary<string, VPTree<AnchorContext>>(StringComparer.OrdinalIgnoreCase);
+				foreach (var kv in contextsByProfile)
+				{
+					if (kv.Value.Count == 0) continue;
+					var weights = GetWeightsForProfileKey(kv.Key);
+					treesByProfile[kv.Key] = new VPTree<AnchorContext>(
+						kv.Value,
+						(a, b) => AnchorContextDistance(a, b, weights),
+						42,
+						Tracing.Tracer);
+				}
+
+				foreach (var p in unclaimedPrev)
+				{
+					if (!CanParticipateInRebinding(p))
+					{
+						result.Lost.Add(p.Id);
+						continue;
+					}
+
+					var pk = GetProfileKey(p);
+					if (string.IsNullOrEmpty(pk)
+						|| !treesByProfile.TryGetValue(pk, out var tree)
+						|| !nodesByProfile.TryGetValue(pk, out var profileNodes))
+					{
+						result.Lost.Add(p.Id);
+						continue;
+					}
+
+					var threshold = settings.GetThreshold(pk);
+					if (threshold <= 0.0)
+					{
+						// слой 2 отключён для этого профиля
+						result.Lost.Add(p.Id);
+						continue;
+					}
+
+					var query = BuildAnchorContext(p);
+					if (query == null)
+					{
+						result.Lost.Add(p.Id);
+						continue;
+					}
+
+					var cands = tree.KNearest(query, 1);
+					if (cands == null || cands.Count == 0)
+					{
+						result.Lost.Add(p.Id);
+						continue;
+					}
+
+					var best = cands[0];
+					if (best.Index < 0 || best.Index >= profileNodes.Count)
+					{
+						result.Lost.Add(p.Id);
+						continue;
+					}
+
+					if (best.Dist > threshold)
+					{
+						result.Lost.Add(p.Id);
+						continue;
+					}
+
+					var freshNode = profileNodes[best.Index];
+					if (claimedFresh.Contains(freshNode))
+					{
+						// Уже сматчился ближе — этот теряется.
+						result.Lost.Add(p.Id);
+						continue;
+					}
+
+					var replacedId = freshNode.Id;
+					freshNode.Id = p.Id;
+					claimedFresh.Add(freshNode);
+					result.MatchedFuzzy.Add((p.Id, replacedId, best.Dist));
+				}
+			}
+			else
+			{
+				foreach (var p in unclaimedPrev)
+					result.Lost.Add(p.Id);
+			}
+
+			foreach (var f in freshList)
+				if (!claimedFresh.Contains(f))
+					result.Fresh.Add(f.Id);
+
+			return result;
 		}
 	}
 }

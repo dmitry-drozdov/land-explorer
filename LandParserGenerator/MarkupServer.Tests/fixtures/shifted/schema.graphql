@@ -1,0 +1,14 @@
+# Schema for shifted-fixture test (offsets are pushed forward by this comment).
+
+
+
+type User {
+  id: ID!
+  name: String!
+}
+
+
+type Query {
+  getUser(id: ID!): User
+  listUsers(limit: Int!): [User!]!
+}

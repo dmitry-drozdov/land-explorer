@@ -1,0 +1,9 @@
+type User {
+  id: ID!
+  name: String!
+}
+
+type Query {
+  findUserById(id: ID!): User
+  listUsers(limit: Int!): [User!]!
+}

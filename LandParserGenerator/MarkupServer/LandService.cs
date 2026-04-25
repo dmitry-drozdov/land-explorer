@@ -61,6 +61,18 @@ namespace MarkupServer
 				c.s = n.StartOffset;
 				c.e = n.EndOffset;
 				c.k = n.AnchorKind;
+
+				// Shadow-узлы (anchor в user-группе) несут aid = реальный AnchorId,
+				// чтобы клиент мог развести occurrence-Id и canonical-Id.
+				if (!string.IsNullOrWhiteSpace(n.RealAnchorId))
+					c.aid = n.RealAnchorId;
+			}
+			else
+			{
+				// Group kind: "user" — пользовательская группа; "auto" не пишем (дефолт),
+				// чтобы старые клиенты не ломались.
+				if (string.Equals(n.GroupKind, "user", StringComparison.OrdinalIgnoreCase))
+					c.gk = "user";
 			}
 
 			if (n.Children != null && n.Children.Count > 0)

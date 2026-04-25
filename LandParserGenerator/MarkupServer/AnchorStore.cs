@@ -15,7 +15,7 @@ namespace MarkupServer
 	/// </summary>
 	internal static class AnchorStore
 	{
-		public const int CurrentVersion = 6;
+		public const int CurrentVersion = 7;
 		private const string FolderName = ".land";
 		private const string FileName = "anchors.json";
 
@@ -60,11 +60,13 @@ namespace MarkupServer
 					parsed.Relations ??= DeriveRelationsFromRoots(parsed.Roots);
 					parsed.Roots ??= new List<TreeNode>();
 					parsed.SuppressedAnchorKeys ??= new List<string>();
+					parsed.UserGroups ??= new List<UserGroup>();
+					parsed.Memberships ??= new List<UserGroupMembership>();
 					data = parsed;
 					return true;
 				}
 
-				if (version == 2 || version == 3 || version == 4 || version == 5)
+				if (version == 2 || version == 3 || version == 4 || version == 5 || version == 6)
 				{
 					var legacy = jo.ToObject<PersistedMarkup>();
 					if (legacy == null)
@@ -87,6 +89,8 @@ namespace MarkupServer
 						Anchors = anchors,
 						Relations = legacy.Relations ?? DeriveRelationsFromRoots(roots),
 						SuppressedAnchorKeys = legacy.SuppressedAnchorKeys ?? new List<string>(),
+						UserGroups = legacy.UserGroups ?? new List<UserGroup>(),
+						Memberships = legacy.Memberships ?? new List<UserGroupMembership>(),
 					};
 					return true;
 				}
@@ -121,6 +125,8 @@ namespace MarkupServer
 				data.Relations ??= new List<PersistedRelation>();
 				data.Roots ??= new List<TreeNode>();
 				data.SuppressedAnchorKeys ??= new List<string>();
+				data.UserGroups ??= new List<UserGroup>();
+				data.Memberships ??= new List<UserGroupMembership>();
 
 				var json = JsonConvert.SerializeObject(
 					data,
@@ -277,5 +283,7 @@ namespace MarkupServer
 		public List<TreeNode> Anchors { get; set; } = new();
 		public List<PersistedRelation> Relations { get; set; } = new();
 		public List<string> SuppressedAnchorKeys { get; set; } = new();
+		public List<UserGroup> UserGroups { get; set; } = new();
+		public List<UserGroupMembership> Memberships { get; set; } = new();
 	}
 }

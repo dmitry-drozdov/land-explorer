@@ -29,6 +29,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "VPTreeLib", "VPTreeLib\VPTr
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "VPTree.Tests", "VPTree.Tests\VPTree.Tests.csproj", "{5B545645-32FF-42F1-926B-6A95BE92CA57}"
 EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "MarkupServer.Tests", "MarkupServer.Tests\MarkupServer.Tests.csproj", "{1A8C0B7E-9D34-4C8E-9A11-4F7B5D8E6C12}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -75,6 +77,10 @@ Global
 		{5B545645-32FF-42F1-926B-6A95BE92CA57}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{5B545645-32FF-42F1-926B-6A95BE92CA57}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{5B545645-32FF-42F1-926B-6A95BE92CA57}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1A8C0B7E-9D34-4C8E-9A11-4F7B5D8E6C12}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1A8C0B7E-9D34-4C8E-9A11-4F7B5D8E6C12}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1A8C0B7E-9D34-4C8E-9A11-4F7B5D8E6C12}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1A8C0B7E-9D34-4C8E-9A11-4F7B5D8E6C12}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
