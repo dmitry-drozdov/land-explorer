@@ -42,7 +42,7 @@ namespace MarkupServer
 		private const string AnchorKindGqlInterface = "gqlInterfaceDef";
 		private const string AnchorKindTs = "tsMember";
 
-		private static TreeNodeClientV2 ToClientNodeV2(TreeNode n)
+		private TreeNodeClientV2 ToClientNodeV2(TreeNode n)
 		{
 			if (n == null) return null;
 			var isAnchor = string.Equals(n.NodeType, "anchor", StringComparison.OrdinalIgnoreCase);
@@ -66,6 +66,21 @@ namespace MarkupServer
 				// чтобы клиент мог развести occurrence-Id и canonical-Id.
 				if (!string.IsNullOrWhiteSpace(n.RealAnchorId))
 					c.aid = n.RealAnchorId;
+
+				// Бейджи для UI — счётчики кросс-якорных связей. Для shadow смотрим на real-id.
+				var idForLinks = string.IsNullOrWhiteSpace(n.RealAnchorId) ? n.Id : n.RealAnchorId;
+				if (!string.IsNullOrWhiteSpace(idForLinks)
+					&& _linkCountByAnchor != null
+					&& _linkCountByAnchor.TryGetValue(idForLinks, out var counts))
+				{
+					if (counts.outCount > 0) c.oc = counts.outCount;
+					if (counts.inCount > 0) c.ic = counts.inCount;
+				}
+
+				// Системный маркер на самом якоре (lostAnchor — для виртуальных
+				// узлов в _Lost-bucket-е и shadow-теней потерянных якорей).
+				if (!string.IsNullOrWhiteSpace(n.SystemKind))
+					c.sys = n.SystemKind;
 			}
 			else
 			{
@@ -73,6 +88,10 @@ namespace MarkupServer
 				// чтобы старые клиенты не ломались.
 				if (string.Equals(n.GroupKind, "user", StringComparison.OrdinalIgnoreCase))
 					c.gk = "user";
+
+				// Системный маркер для специальных групп (_Lost-bucket).
+				if (!string.IsNullOrWhiteSpace(n.SystemKind))
+					c.sys = n.SystemKind;
 			}
 
 			if (n.Children != null && n.Children.Count > 0)
@@ -81,13 +100,13 @@ namespace MarkupServer
 			return c;
 		}
 
-		private static List<TreeNodeClientV2> ToClientRootsV2(List<TreeNode> roots)
+		private List<TreeNodeClientV2> ToClientRootsV2(List<TreeNode> roots)
 			=> roots?.Select(ToClientNodeV2).Where(x => x != null).ToList() ?? new List<TreeNodeClientV2>();
 
-		private static ListTreeResultV2 MakeListTreeResult(List<TreeNode> roots, bool? fromCache)
+		private ListTreeResultV2 MakeListTreeResult(List<TreeNode> roots, bool? fromCache)
 			=> new ListTreeResultV2 { r = ToClientRootsV2(roots), fc = fromCache };
 
-		private static UpdateAnchorResultV2 MakeUpdateAnchorResult(
+		private UpdateAnchorResultV2 MakeUpdateAnchorResult(
 			TreeNode updated,
 			string parentGroupId = null,
 			string parentGroupName = null,
@@ -102,7 +121,7 @@ namespace MarkupServer
 				fn = fieldGroupName,
 			};
 
-		private static AddAnchorResultV2 MakeAddAnchorResult(TreeNode node, bool? alreadyExists = null, string message = null)
+		private AddAnchorResultV2 MakeAddAnchorResult(TreeNode node, bool? alreadyExists = null, string message = null)
 			=> new AddAnchorResultV2
 			{
 				a = ToClientNodeV2(node),

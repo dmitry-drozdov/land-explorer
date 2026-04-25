@@ -10,7 +10,7 @@ namespace MarkupServer
 {
 	public partial class LandService
 	{
-		private static ParentRebindOptionsResultV2 MakeParentRebindOptionsResult(
+		private ParentRebindOptionsResultV2 MakeParentRebindOptionsResult(
 			TreeNode effective,
 			IEnumerable<TreeNode> options,
 			string message = null)

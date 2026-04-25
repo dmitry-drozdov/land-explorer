@@ -265,6 +265,7 @@ namespace MarkupServer
 				Args = n.Args?.Select(x => new Arg { TypeNorm = x.TypeNorm, NameNorm = x.NameNorm }).ToList(),
 				OrdinalInParent = n.OrdinalInParent,
 				NeighborBag = n.NeighborBag != null ? new Dictionary<string, double>(n.NeighborBag, StringComparer.Ordinal) : null,
+				SystemKind = n.SystemKind,
 			};
 		}
 
@@ -1029,6 +1030,35 @@ namespace MarkupServer
 				if (!string.IsNullOrWhiteSpace(a?.Id))
 					anchorsById[a.Id] = a;
 
+			// Виртуальные якоря из _Lost-bucket-а: добавляем в anchorsById, чтобы
+			// shadow-теневые узлы в обычных user/auto-группах могли отрисоваться
+			// (с маркером SystemKind="lostAnchor"). Это даёт пользователю видимость
+			// "точка была здесь, но пропала" прямо в его рабочих папках.
+			foreach (var lost in markup.LostAnchors ?? new List<LostAnchor>())
+			{
+				if (lost == null || string.IsNullOrWhiteSpace(lost.AnchorId))
+					continue;
+				if (anchorsById.ContainsKey(lost.AnchorId))
+					continue;
+
+				anchorsById[lost.AnchorId] = new TreeNode
+				{
+					Id = lost.AnchorId,
+					Name = lost.Name,
+					NodeType = "anchor",
+					Language = lost.Language,
+					AnchorKind = lost.AnchorKind,
+					AnchorFamily = lost.AnchorFamily,
+					ParentNameRaw = lost.ParentNameRaw,
+					MethodNameNorm = lost.MethodNameNorm,
+					GqlTypeKind = lost.GqlTypeKind,
+					Filepath = lost.Filepath,
+					StartOffset = null,
+					EndOffset = null,
+					SystemKind = "lostAnchor",
+				};
+			}
+
 			var membershipsByGroup = new Dictionary<string, List<UserGroupMembership>>(StringComparer.OrdinalIgnoreCase);
 			foreach (var m in markup.Memberships ?? new List<UserGroupMembership>())
 			{
@@ -1039,7 +1069,14 @@ namespace MarkupServer
 				bucket.Add(m);
 			}
 
-			// User-группы рендерятся ПЕРЕД auto-группами, чтобы пользовательская
+			// _Lost-bucket рендерится первым (сверху), если есть утерянные якоря
+			// со связями. Это привлекает внимание пользователя к необходимости
+			// recovery, и не теряется среди user-групп.
+			var lostRoot = BuildLostBucketRoot(markup);
+			if (lostRoot != null)
+				result.Add(lostRoot);
+
+			// User-группы рендерятся перед auto-группами, чтобы пользовательская
 			// организация была сразу видна сверху. Якоря в user-группах рендерятся
 			// как shadow-узлы (Id = memberOf:groupId::anchorId, RealAnchorId = anchorId)
 			// — это нужно для корректной работы treeView.reveal() при multi-membership.
@@ -1253,10 +1290,65 @@ namespace MarkupServer
 			return result;
 		}
 
+		/// <summary>
+		/// Системная корневая группа "_Lost (N)" со всеми утерянными якорями
+		/// (которые при сшивке Id потеряли связь с текущим состоянием кода,
+		/// но имели memberships или links — поэтому полностью отбросить нельзя).
+		/// Возвращает null, если LostAnchors пуст.
+		/// </summary>
+		private TreeNode BuildLostBucketRoot(PersistedMarkup markup)
+		{
+			var lost = (markup?.LostAnchors ?? new List<LostAnchor>())
+				.Where(l => l != null && !string.IsNullOrWhiteSpace(l.AnchorId))
+				.OrderBy(l => l.Name ?? "", StringComparer.OrdinalIgnoreCase)
+				.ToList();
+
+			if (lost.Count == 0)
+				return null;
+
+			var root = new TreeNode
+			{
+				Id = "system:lost",
+				Name = $"_Lost ({lost.Count})",
+				NodeType = "group",
+				// GroupKind не ставим — _Lost не является "пользовательской" группой;
+				// узнаётся по SystemKind="lost" (sys="lost" на клиенте).
+				SystemKind = "lost",
+				Children = new List<TreeNode>(),
+			};
+
+			foreach (var l in lost)
+			{
+				var displayName = string.IsNullOrWhiteSpace(l.Name) ? "(unnamed)" : l.Name;
+				if (l.WasInGroupNames != null && l.WasInGroupNames.Count > 0)
+					displayName = $"{displayName} (was in: {string.Join(", ", l.WasInGroupNames)})";
+
+				root.Children.Add(new TreeNode
+				{
+					Id = l.AnchorId,
+					Name = displayName,
+					NodeType = "anchor",
+					Language = l.Language,
+					AnchorKind = l.AnchorKind,
+					AnchorFamily = l.AnchorFamily,
+					ParentNameRaw = l.ParentNameRaw,
+					MethodNameNorm = l.MethodNameNorm,
+					GqlTypeKind = l.GqlTypeKind,
+					Filepath = l.Filepath,
+					StartOffset = null,
+					EndOffset = null,
+					SystemKind = "lostAnchor",
+				});
+			}
+
+			return root;
+		}
+
 		private void RebuildMarkupRootsUnsafe()
 		{
 			if (currentMarkup == null)
 				currentMarkup = new PersistedMarkup();
+			RebuildLinkCountIndexUnsafe();
 			currentMarkup.Roots = BuildRootsFromMarkup(currentMarkup);
 		}
 

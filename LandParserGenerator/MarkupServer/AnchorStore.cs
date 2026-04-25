@@ -15,7 +15,7 @@ namespace MarkupServer
 	/// </summary>
 	internal static class AnchorStore
 	{
-		public const int CurrentVersion = 7;
+		public const int CurrentVersion = 8;
 		private const string FolderName = ".land";
 		private const string FileName = "anchors.json";
 
@@ -62,11 +62,13 @@ namespace MarkupServer
 					parsed.SuppressedAnchorKeys ??= new List<string>();
 					parsed.UserGroups ??= new List<UserGroup>();
 					parsed.Memberships ??= new List<UserGroupMembership>();
+					parsed.Links ??= new List<AnchorLink>();
+					parsed.LostAnchors ??= new List<LostAnchor>();
 					data = parsed;
 					return true;
 				}
 
-				if (version == 2 || version == 3 || version == 4 || version == 5 || version == 6)
+				if (version >= 2 && version <= 7)
 				{
 					var legacy = jo.ToObject<PersistedMarkup>();
 					if (legacy == null)
@@ -91,6 +93,8 @@ namespace MarkupServer
 						SuppressedAnchorKeys = legacy.SuppressedAnchorKeys ?? new List<string>(),
 						UserGroups = legacy.UserGroups ?? new List<UserGroup>(),
 						Memberships = legacy.Memberships ?? new List<UserGroupMembership>(),
+						Links = legacy.Links ?? new List<AnchorLink>(),
+						LostAnchors = legacy.LostAnchors ?? new List<LostAnchor>(),
 					};
 					return true;
 				}
@@ -127,6 +131,8 @@ namespace MarkupServer
 				data.SuppressedAnchorKeys ??= new List<string>();
 				data.UserGroups ??= new List<UserGroup>();
 				data.Memberships ??= new List<UserGroupMembership>();
+				data.Links ??= new List<AnchorLink>();
+				data.LostAnchors ??= new List<LostAnchor>();
 
 				var json = JsonConvert.SerializeObject(
 					data,
@@ -285,5 +291,7 @@ namespace MarkupServer
 		public List<string> SuppressedAnchorKeys { get; set; } = new();
 		public List<UserGroup> UserGroups { get; set; } = new();
 		public List<UserGroupMembership> Memberships { get; set; } = new();
+		public List<AnchorLink> Links { get; set; } = new();
+		public List<LostAnchor> LostAnchors { get; set; } = new();
 	}
 }

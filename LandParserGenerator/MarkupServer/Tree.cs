@@ -45,6 +45,9 @@ namespace MarkupServer
 		// Только для group-узлов: "auto" (по умолчанию для совместимости) или "user".
 		// На клиент уходит как поле `gk` в TreeNodeClientV2.
 		public string GroupKind { get; set; }
+		// Только для group-узлов: системный маркер (например, "lost" для _Lost-bucket-а).
+		// Уходит на клиент как поле `sys`.
+		public string SystemKind { get; set; }
 	}
 
 	/// <summary>
@@ -76,6 +79,12 @@ namespace MarkupServer
 		public string gk { get; set; }
 		/// <summary>Real anchor id для shadow-узла (anchor внутри user-группы). Если null — узел канонический.</summary>
 		public string aid { get; set; }
+		/// <summary>Сколько исходящих кросс-якорных связей у этого якоря (для бейджа в UI). Не сериализуется если 0.</summary>
+		public int? oc { get; set; }
+		/// <summary>Сколько входящих кросс-якорных связей у этого якоря. Не сериализуется если 0.</summary>
+		public int? ic { get; set; }
+		/// <summary>Системный маркер для специальных групп (sys="lost" — _Lost-bucket для утерянных якорей).</summary>
+		public string sys { get; set; }
 	}
 
 	public class ListTreeResultV2
@@ -236,6 +245,128 @@ namespace MarkupServer
 		public string m { get; set; }
 		public bool? alreadyMember { get; set; }        // только для add — уже состоит в группе
 		public int? removedMemberships { get; set; }    // только для delete группы — сколько связок упало
+	}
+
+	// =========================================================================
+	// Cross-anchor links (этап 2): пользовательские направленные связи между
+	// якорями. Хранятся в snapshot, переживают rebind (по стабильным AnchorId)
+	// и forceRescan (через сшивку Id из этапа 0).
+	// =========================================================================
+
+	/// <summary>
+	/// Внутренняя модель пользовательской направленной связи (subordination).
+	/// Persistится в snapshot.
+	/// </summary>
+	public class AnchorLink
+	{
+		public string Id { get; set; }                  // "link:" + GUID
+		public string SourceAnchorId { get; set; }      // якорь-источник
+		public string TargetAnchorId { get; set; }      // якорь-цель
+		public string Kind { get; set; }                // optional: "calls"/"implements"/"see also"/...
+		public string Label { get; set; }               // optional: свободная заметка
+		public DateTime CreatedAtUtc { get; set; }
+	}
+
+	/// <summary>
+	/// Snapshot потерянного якоря — попадает сюда, если при сшивке Id auto-якорь
+	/// не сматчился с предыдущим snapshot-ом (либо manual rebind не нашёл цели),
+	/// и у него были memberships или links. Пользователь может либо восстановить
+	/// связь руками (recoverLostAnchor) на новый якорь, либо отбросить (discardLostAnchor).
+	/// </summary>
+	public class LostAnchor
+	{
+		public string AnchorId { get; set; }            // прежний opaque AnchorId (gql:/ts:/manual:)
+		public string Name { get; set; }
+		public string Filepath { get; set; }
+		public string Language { get; set; }
+		public string AnchorKind { get; set; }
+		public string AnchorFamily { get; set; }
+		public string ParentNameRaw { get; set; }
+		public string MethodNameNorm { get; set; }
+		public string GqlTypeKind { get; set; }
+		public DateTime LostAtUtc { get; set; }
+		// Сохраняем имена групп на момент потери, чтобы UI мог показать "(was in: ...)"
+		public List<string> WasInGroupNames { get; set; } = new();
+	}
+
+	// ----- Params/Result DTO для RPC links -----
+
+	public class AddLinkParams
+	{
+		public string sourceId { get; set; }
+		public string targetId { get; set; }
+		public string kind { get; set; }                // optional
+		public string label { get; set; }               // optional
+	}
+
+	public class RemoveLinkParams
+	{
+		public string linkId { get; set; }
+	}
+
+	public class ListLinksParams
+	{
+		public string anchorId { get; set; }
+	}
+
+	/// <summary>
+	/// DTO связи на клиента. Включает peer-info, чтобы клиент мог сразу
+	/// нарисовать пункт QuickPick без дополнительного round-trip-а.
+	/// </summary>
+	public class LinkClientV2
+	{
+		public string id { get; set; }                  // link id
+		public string src { get; set; }                 // source anchor id
+		public string tgt { get; set; }                 // target anchor id
+		public string kind { get; set; }
+		public string label { get; set; }
+		// Имя/файл другой стороны (peer) — для отображения в UI без extra request.
+		// peer = target если listLinks вызван для source-якоря, иначе source.
+		public string pn { get; set; }                  // peer name
+		public string pf { get; set; }                  // peer filepath
+		public int? ps { get; set; }                    // peer start offset
+		public string pk { get; set; }                  // peer anchor kind
+		public bool? lost { get; set; }                 // peer находится в _Lost
+	}
+
+	public class LinkResultV2
+	{
+		public LinkClientV2 l { get; set; }
+		public string m { get; set; }
+	}
+
+	public class LinksListResultV2
+	{
+		public List<LinkClientV2> outgoing { get; set; } = new();
+		public List<LinkClientV2> incoming { get; set; } = new();
+		public string m { get; set; }
+	}
+
+	public class LinkSimpleResultV2
+	{
+		public bool? ok { get; set; }
+		public string m { get; set; }
+	}
+
+	// ----- Params/Result DTO для recovery утерянных якорей -----
+
+	public class RecoverLostAnchorParams
+	{
+		public string lostAnchorId { get; set; }        // прежний AnchorId из LostAnchor
+		public string newAnchorId { get; set; }         // на какой живой якорь перевешиваем memberships+links
+	}
+
+	public class DiscardLostAnchorParams
+	{
+		public string lostAnchorId { get; set; }
+	}
+
+	public class LostAnchorRecoveryResultV2
+	{
+		public bool? ok { get; set; }
+		public string m { get; set; }
+		public int? recoveredMemberships { get; set; }
+		public int? recoveredLinks { get; set; }
 	}
 
 }

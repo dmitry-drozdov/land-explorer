@@ -343,8 +343,13 @@ public class UserGroupTests
 	}
 
 	[TestMethod]
-	public async Task Lost_Anchor_On_Rescan_Drops_Membership_Silently()
+	public async Task Lost_Anchor_On_Rescan_Goes_To_Lost_Bucket_And_Marks_Shadow()
 	{
+		// Документирующий тест нового поведения (этап 2): membership на якорь,
+		// который при сшивке Id потерялся, НЕ выкидывается молча — якорь уезжает
+		// в системный _Lost-bucket, а в user-группе остаётся теневой узел
+		// с маркером lostAnchor. Это даёт пользователю видимость потери прямо
+		// в его рабочих папках, и возможность recover-ить или discard-нуть.
 		CopyFixtureInto("basic");
 		var svc = await CreateInitializedService();
 		await ListAsync(svc);
@@ -353,12 +358,24 @@ public class UserGroupTests
 		var grp = (await svc.CreateUserGroupAsync(new CreateUserGroupParams { name = "WillLoseMember" })).g;
 		await svc.AddAnchorToGroupAsync(new AddAnchorToGroupParams { anchorId = listUsersId, groupId = grp.id });
 
-		// listUsers исчезает в фикстуре removed → его membership должен подчиститься.
+		// listUsers исчезает в фикстуре removed (только в schema.graphql).
 		CopyFixtureInto("removed");
 		var listed = await ListAsync(svc, forceRescan: true);
 
+		// User-группа сама уцелела — и НЕ считается среди auto-групп.
 		var userGroups = RootGroupsByKind(listed, "user");
-		Assert.AreEqual(1, userGroups.Count, "the group itself must survive (anchor-less is OK)");
-		Assert.AreEqual(0, userGroups[0].c?.Count ?? 0, "membership of the lost anchor must be cleaned");
+		Assert.AreEqual(1, userGroups.Count, "the user group itself must survive");
+		Assert.AreEqual(grp.id, userGroups[0].id);
+
+		// Внутри неё shadow-узел с маркером lostAnchor (а не отсутствие — membership перенесён).
+		Assert.AreEqual(1, userGroups[0].c?.Count ?? 0, "shadow with lost marker must remain in the user group");
+		var shadow = userGroups[0].c[0];
+		Assert.AreEqual("lostAnchor", shadow.sys, "shadow must carry the lostAnchor marker");
+		Assert.AreEqual(listUsersId, shadow.aid, "shadow must point at the original (now-lost) anchor id");
+
+		// Появилась системная группа _Lost.
+		var lostBucket = listed.r.FirstOrDefault(n => string.Equals(n.sys, "lost", StringComparison.OrdinalIgnoreCase));
+		Assert.IsNotNull(lostBucket, "_Lost bucket must appear");
+		Assert.IsTrue(lostBucket.c.Any(x => x.id == listUsersId), "lost anchor must be inside _Lost");
 	}
 }
