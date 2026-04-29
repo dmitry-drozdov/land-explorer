@@ -85,6 +85,8 @@ namespace MarkupServer
 		public int? ic { get; set; }
 		/// <summary>Системный маркер для специальных групп (sys="lost" — _Lost-bucket для утерянных якорей).</summary>
 		public string sys { get; set; }
+		/// <summary>true, если у якоря есть auto-pair (gqlField↔ts-резолвер). На клиенте даёт префикс ◆.</summary>
+		public bool? pr { get; set; }
 	}
 
 	public class ListTreeResultV2

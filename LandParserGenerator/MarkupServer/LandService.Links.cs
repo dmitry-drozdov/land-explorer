@@ -19,6 +19,17 @@ namespace MarkupServer
 		// =========================================================================
 
 		private const string LinkIdPrefix = "link:";
+		// Системный kind для auto-pair связей (gqlField ↔ ts-резолвер).
+		// Эти связи синтезируются из Relations и:
+		//  - НЕ сохраняются на диск (фильтруются в AnchorStore.TrySave);
+		//  - НЕ учитываются в счётчиках oc/ic у бейджа;
+		//  - НЕ показываются в listLinks (Outgoing/Incoming);
+		//  - НЕ создаются через addLink (kind зарезервирован).
+		// Префикс "_" — соглашение «системный, не для user-UI».
+		internal const string AutoPairKind = "_autoPair";
+
+		private static bool IsAutoPair(AnchorLink l)
+			=> l != null && string.Equals(l.Kind, AutoPairKind, StringComparison.Ordinal);
 
 		private static LinkClientV2 ToClientLink(AnchorLink link, TreeNode peer, bool peerIsLost)
 		{
@@ -53,6 +64,11 @@ namespace MarkupServer
 
 			if (string.Equals(p.sourceId, p.targetId, StringComparison.OrdinalIgnoreCase))
 				return Task.FromResult(new LinkResultV2 { l = null, m = "Якорь не может быть связан сам с собой." });
+
+			// Системный kind зарезервирован под auto-pair (gqlField↔ts-резолвер),
+			// синтезируется автоматически на основе Relations.
+			if (string.Equals(p.kind, AutoPairKind, StringComparison.Ordinal))
+				return Task.FromResult(new LinkResultV2 { l = null, m = "Этот тип связи зарезервирован системой." });
 
 			lock (markupLock)
 			{
@@ -186,7 +202,9 @@ namespace MarkupServer
 				var outgoing = new List<LinkClientV2>();
 				var incoming = new List<LinkClientV2>();
 
-				foreach (var l in links.Where(x => x != null))
+				// Системные auto-pair (gqlField↔ts) фильтруем — пользователь видит их
+				// только через префикс ◆, не через QuickPick связей.
+				foreach (var l in links.Where(x => x != null && !IsAutoPair(x)))
 				{
 					var isOutgoing = string.Equals(l.SourceAnchorId, p.anchorId, StringComparison.OrdinalIgnoreCase);
 					var isIncoming = string.Equals(l.TargetAnchorId, p.anchorId, StringComparison.OrdinalIgnoreCase);
@@ -233,11 +251,15 @@ namespace MarkupServer
 		// Подсчёт outgoing/incoming для конкретного якоря — нужно для бейджей в дереве.
 		// Вызывается из ToClientNodeV2 при наличии currentMarkup.Links; должен быть быстрым.
 		// Кэшируется в RebuildMarkupRootsUnsafe через _linkCountByAnchor.
+		// Параллельно собирается _pairedAnchorIds — set anchor-Id, у которых есть auto-pair
+		// (gqlField↔ts) — для проставления pr: true в DTO (префикс ◆ на клиенте).
 		private Dictionary<string, (int outCount, int inCount)> _linkCountByAnchor = new(StringComparer.OrdinalIgnoreCase);
+		private HashSet<string> _pairedAnchorIds = new(StringComparer.OrdinalIgnoreCase);
 
 		private void RebuildLinkCountIndexUnsafe()
 		{
 			_linkCountByAnchor = new Dictionary<string, (int, int)>(StringComparer.OrdinalIgnoreCase);
+			_pairedAnchorIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 			var links = currentMarkup?.Links;
 			if (links == null || links.Count == 0)
 				return;
@@ -245,6 +267,18 @@ namespace MarkupServer
 			foreach (var l in links)
 			{
 				if (l == null) continue;
+
+				// Auto-pair (системные) идут в отдельный set — они не считаются в счётчиках,
+				// но дают маркер ◆ обоим эндпоинтам.
+				if (IsAutoPair(l))
+				{
+					if (!string.IsNullOrWhiteSpace(l.SourceAnchorId))
+						_pairedAnchorIds.Add(l.SourceAnchorId);
+					if (!string.IsNullOrWhiteSpace(l.TargetAnchorId))
+						_pairedAnchorIds.Add(l.TargetAnchorId);
+					continue;
+				}
+
 				if (!string.IsNullOrWhiteSpace(l.SourceAnchorId))
 				{
 					_linkCountByAnchor.TryGetValue(l.SourceAnchorId, out var cur);
@@ -254,6 +288,43 @@ namespace MarkupServer
 				{
 					_linkCountByAnchor.TryGetValue(l.TargetAnchorId, out var cur);
 					_linkCountByAnchor[l.TargetAnchorId] = (cur.Item1, cur.Item2 + 1);
+				}
+			}
+		}
+
+		/// <summary>
+		/// Удаляет существующие auto-pair Links и пересинтезирует их из текущих Relations.
+		/// Вызывается перед RebuildLinkCountIndexUnsafe (внутри RebuildMarkupRootsUnsafe).
+		/// Идемпотентен — повторные вызовы при тех же Relations дают тот же результат.
+		/// На диск эти связи не уходят (фильтруются в AnchorStore.TrySave).
+		/// </summary>
+		private void SynthesizeAutoPairLinksUnsafe()
+		{
+			currentMarkup ??= new PersistedMarkup();
+			currentMarkup.Links ??= new List<AnchorLink>();
+
+			// 1. Стираем все существующие auto-pair (если оставались с прошлого раза).
+			currentMarkup.Links = currentMarkup.Links
+				.Where(l => l == null || !IsAutoPair(l))
+				.ToList();
+
+			// 2. Синтезируем заново из Relations (gqlField → tsTargets).
+			//    Id auto-pair детерминирован по парам, чтобы при многократных синтезах
+			//    те же пары имели те же link.Id (полезно для отладки).
+			foreach (var rel in currentMarkup.Relations ?? new List<PersistedRelation>())
+			{
+				if (string.IsNullOrWhiteSpace(rel?.SourceAnchorId)) continue;
+				foreach (var tgt in rel.TargetAnchorIds ?? new List<string>())
+				{
+					if (string.IsNullOrWhiteSpace(tgt)) continue;
+					currentMarkup.Links.Add(new AnchorLink
+					{
+						Id = $"autoPair:{rel.SourceAnchorId}->{tgt}",
+						SourceAnchorId = rel.SourceAnchorId,
+						TargetAnchorId = tgt,
+						Kind = AutoPairKind,
+						CreatedAtUtc = DateTime.UtcNow,
+					});
 				}
 			}
 		}

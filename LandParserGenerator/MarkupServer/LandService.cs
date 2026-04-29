@@ -77,6 +77,20 @@ namespace MarkupServer
 					if (counts.inCount > 0) c.ic = counts.inCount;
 				}
 
+				// Auto-pair (gqlField↔ts-резолвер) — даёт префикс ◆ на клиенте.
+				// Ставим ТОЛЬКО на canonical (RealAnchorId не задан): это маркер
+				// "ядро auto-группы". У shadow в user-папках префикс не нужен —
+				// иначе при добавлении ссылки на якорь, который где-то является
+				// главным в своей паре, ◆ ехал бы в чужую папку и сбивал смысл.
+				var isShadow = !string.IsNullOrWhiteSpace(n.RealAnchorId);
+				if (!isShadow
+					&& !string.IsNullOrWhiteSpace(idForLinks)
+					&& _pairedAnchorIds != null
+					&& _pairedAnchorIds.Contains(idForLinks))
+				{
+					c.pr = true;
+				}
+
 				// Системный маркер на самом якоре (lostAnchor — для виртуальных
 				// узлов в _Lost-bucket-е и shadow-теней потерянных якорей).
 				if (!string.IsNullOrWhiteSpace(n.SystemKind))

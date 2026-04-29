@@ -134,13 +134,30 @@ namespace MarkupServer
 				data.Links ??= new List<AnchorLink>();
 				data.LostAnchors ??= new List<LostAnchor>();
 
-				var json = JsonConvert.SerializeObject(
-					data,
-					Formatting.Indented,
-					new JsonSerializerSettings
-					{
-						NullValueHandling = NullValueHandling.Ignore
-					});
+				// Системные auto-pair Links (kind="_autoPair") синтезируются на лету
+				// из Relations и НЕ должны попадать на диск — иначе при загрузке snapshot
+				// и последующем синтезе появятся дубликаты, плюс файл засорится.
+				// Делаем swap, сериализуем без них, потом возвращаем — UI продолжает их видеть.
+				var originalLinks = data.Links;
+				data.Links = data.Links
+					.Where(l => l == null || !string.Equals(l.Kind, "_autoPair", StringComparison.Ordinal))
+					.ToList();
+
+				string json;
+				try
+				{
+					json = JsonConvert.SerializeObject(
+						data,
+						Formatting.Indented,
+						new JsonSerializerSettings
+						{
+							NullValueHandling = NullValueHandling.Ignore
+						});
+				}
+				finally
+				{
+					data.Links = originalLinks;
+				}
 
 				var tmp = path + ".tmp";
 				File.WriteAllText(tmp, json, Encoding.UTF8);

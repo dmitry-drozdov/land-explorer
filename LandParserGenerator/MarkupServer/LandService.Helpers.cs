@@ -1348,6 +1348,9 @@ namespace MarkupServer
 		{
 			if (currentMarkup == null)
 				currentMarkup = new PersistedMarkup();
+			// Сначала синтез auto-pair (на основе текущих Relations),
+			// потом индексы (включая paired set), потом сборка дерева.
+			SynthesizeAutoPairLinksUnsafe();
 			RebuildLinkCountIndexUnsafe();
 			currentMarkup.Roots = BuildRootsFromMarkup(currentMarkup);
 		}
