@@ -69,6 +69,7 @@ namespace MarkupServer
 			var updated = CloneAnchor(newNode);
 			updated.Id = p.anchorId;
 			updated.IsManual = oldNode.IsManual;
+			updated.Comment = oldNode.Comment;
 			updated.AnchorFamily = EnsureAnchorFamily(updated);
 
 			var isGql = string.Equals(updated.Language, LangGql, StringComparison.OrdinalIgnoreCase);

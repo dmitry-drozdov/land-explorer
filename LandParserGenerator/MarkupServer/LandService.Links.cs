@@ -356,10 +356,15 @@ namespace MarkupServer
 				if (lost == null)
 					return Task.FromResult(new LostAnchorRecoveryResultV2 { ok = false, m = "Утерянный якорь не найден." });
 
-				var newAnchorExists = currentMarkup.Anchors
-					.Any(a => a != null && string.Equals(a.Id, p.newAnchorId, StringComparison.OrdinalIgnoreCase));
-				if (!newAnchorExists)
+				var newAnchor = currentMarkup.Anchors
+					.FirstOrDefault(a => a != null && string.Equals(a.Id, p.newAnchorId, StringComparison.OrdinalIgnoreCase));
+				if (newAnchor == null)
 					return Task.FromResult(new LostAnchorRecoveryResultV2 { ok = false, m = "Целевой якорь не найден в текущем снимке." });
+
+				// Перенос комментария: если у нового якоря нет своего, переносим с потерянного.
+				// Если есть — не трогаем (пользовательская правка важнее).
+				if (string.IsNullOrWhiteSpace(newAnchor.Comment) && !string.IsNullOrWhiteSpace(lost.Comment))
+					newAnchor.Comment = lost.Comment;
 
 				int recoveredMembers = 0;
 				int recoveredLinks = 0;

@@ -48,6 +48,10 @@ namespace MarkupServer
 		// Только для group-узлов: системный маркер (например, "lost" для _Lost-bucket-а).
 		// Уходит на клиент как поле `sys`.
 		public string SystemKind { get; set; }
+		// Пользовательский комментарий — свободный текст. Привязан к стабильному AnchorId
+		// (для якоря) или к UserGroup.Id (для user-группы). Переживает rebind.
+		// На клиент уходит как поле `cm` в TreeNodeClientV2.
+		public string Comment { get; set; }
 	}
 
 	/// <summary>
@@ -87,6 +91,8 @@ namespace MarkupServer
 		public string sys { get; set; }
 		/// <summary>true, если у якоря есть auto-pair (gqlField↔ts-резолвер). На клиенте даёт префикс ◆.</summary>
 		public bool? pr { get; set; }
+		/// <summary>Пользовательский комментарий (свободный текст). Сервер не шлёт, если пусто.</summary>
+		public string cm { get; set; }
 	}
 
 	public class ListTreeResultV2
@@ -190,6 +196,7 @@ namespace MarkupServer
 		public int? Order { get; set; }                 // сортировка соседей; null = по имени
 		public DateTime CreatedAtUtc { get; set; }
 		public DateTime UpdatedAtUtc { get; set; }
+		public string Comment { get; set; }             // пользовательский комментарий (опц.)
 	}
 
 	/// <summary>
@@ -289,6 +296,9 @@ namespace MarkupServer
 		public DateTime LostAtUtc { get; set; }
 		// Сохраняем имена групп на момент потери, чтобы UI мог показать "(was in: ...)"
 		public List<string> WasInGroupNames { get; set; } = new();
+		// Комментарий якоря на момент потери — пользователь может вернуть его
+		// при recoverLostAnchor (или будет использован при отображении).
+		public string Comment { get; set; }
 	}
 
 	// ----- Params/Result DTO для RPC links -----
@@ -369,6 +379,25 @@ namespace MarkupServer
 		public string m { get; set; }
 		public int? recoveredMemberships { get; set; }
 		public int? recoveredLinks { get; set; }
+	}
+
+	// =========================================================================
+	// Pользовательский комментарий — поле Comment у якоря или user-группы.
+	// Универсальный RPC, target определяется по префиксу:
+	//   - "userGroup:..." → user-группа
+	//   - "gql:.../ts:.../manual:..." → якорь (canonical Id)
+	// =========================================================================
+
+	public class SetCommentParams
+	{
+		public string targetId { get; set; }
+		public string comment { get; set; }             // null/empty = удалить комментарий
+	}
+
+	public class SetCommentResultV2
+	{
+		public bool? ok { get; set; }
+		public string m { get; set; }
 	}
 
 }

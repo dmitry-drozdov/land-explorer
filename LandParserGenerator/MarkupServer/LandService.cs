@@ -95,6 +95,10 @@ namespace MarkupServer
 				// узлов в _Lost-bucket-е и shadow-теней потерянных якорей).
 				if (!string.IsNullOrWhiteSpace(n.SystemKind))
 					c.sys = n.SystemKind;
+
+				// Пользовательский комментарий — переходит на клиент только если есть.
+				if (!string.IsNullOrWhiteSpace(n.Comment))
+					c.cm = n.Comment;
 			}
 			else
 			{
@@ -106,6 +110,10 @@ namespace MarkupServer
 				// Системный маркер для специальных групп (_Lost-bucket).
 				if (!string.IsNullOrWhiteSpace(n.SystemKind))
 					c.sys = n.SystemKind;
+
+				// Комментарий у user-группы — приходит из UserGroup.Comment через рендер.
+				if (!string.IsNullOrWhiteSpace(n.Comment))
+					c.cm = n.Comment;
 			}
 
 			if (n.Children != null && n.Children.Count > 0)

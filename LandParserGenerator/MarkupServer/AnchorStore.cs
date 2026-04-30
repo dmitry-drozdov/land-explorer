@@ -15,7 +15,7 @@ namespace MarkupServer
 	/// </summary>
 	internal static class AnchorStore
 	{
-		public const int CurrentVersion = 8;
+		public const int CurrentVersion = 9;
 		private const string FolderName = ".land";
 		private const string FileName = "anchors.json";
 
@@ -68,7 +68,7 @@ namespace MarkupServer
 					return true;
 				}
 
-				if (version >= 2 && version <= 7)
+				if (version >= 2 && version <= 8)
 				{
 					var legacy = jo.ToObject<PersistedMarkup>();
 					if (legacy == null)

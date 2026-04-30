@@ -266,6 +266,7 @@ namespace MarkupServer
 				OrdinalInParent = n.OrdinalInParent,
 				NeighborBag = n.NeighborBag != null ? new Dictionary<string, double>(n.NeighborBag, StringComparer.Ordinal) : null,
 				SystemKind = n.SystemKind,
+				Comment = n.Comment,
 			};
 		}
 
@@ -551,6 +552,7 @@ namespace MarkupServer
 			var rebound = CloneAnchor(nodes[best.Index]);
 			rebound.Id = oldNode.Id;
 			rebound.IsManual = oldNode.IsManual;
+			rebound.Comment = oldNode.Comment;
 			rebound.AnchorFamily = EnsureAnchorFamily(rebound);
 			return rebound;
 		}
@@ -1056,6 +1058,7 @@ namespace MarkupServer
 					StartOffset = null,
 					EndOffset = null,
 					SystemKind = "lostAnchor",
+					Comment = lost.Comment,
 				};
 			}
 
@@ -1281,6 +1284,7 @@ namespace MarkupServer
 					NodeType = "group",
 					GroupKind = "user",
 					Children = new List<TreeNode>(),
+					Comment = g.Comment,
 				};
 
 				AppendMembershipShadows(groupNode, anchorsById, membershipsByGroup);
@@ -1338,6 +1342,7 @@ namespace MarkupServer
 					StartOffset = null,
 					EndOffset = null,
 					SystemKind = "lostAnchor",
+					Comment = l.Comment,
 				});
 			}
 
@@ -1595,6 +1600,9 @@ namespace MarkupServer
 
 				var replacedId = chosen.Id;
 				chosen.Id = p.Id;
+				// Перенос пользовательского комментария на новый якорь:
+				// поле принадлежит стабильной идентичности, не позиции в коде.
+				chosen.Comment = p.Comment;
 				claimedFresh.Add(chosen);
 				result.MatchedExact.Add((p.Id, replacedId));
 			}
@@ -1699,6 +1707,7 @@ namespace MarkupServer
 
 					var replacedId = freshNode.Id;
 					freshNode.Id = p.Id;
+					freshNode.Comment = p.Comment;
 					claimedFresh.Add(freshNode);
 					result.MatchedFuzzy.Add((p.Id, replacedId, best.Dist));
 				}

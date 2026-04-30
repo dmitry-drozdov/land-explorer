@@ -198,6 +198,7 @@ namespace MarkupServer
 					GqlTypeKind = prevAnchor.GqlTypeKind,
 					LostAtUtc = DateTime.UtcNow,
 					WasInGroupNames = groupNames,
+					Comment = prevAnchor.Comment,
 				});
 			}
 
