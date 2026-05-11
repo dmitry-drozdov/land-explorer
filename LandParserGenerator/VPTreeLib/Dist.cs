@@ -13,16 +13,24 @@ namespace VPTree
 	{
 		public sealed class Weights
 		{
-			public double NameW = 0.20;
-			public double ArgsW = 0.40;
-			public double ReturnsW = 0.20;
-			public double ParentW = 0.10;
-			public double NeighW = 0.10;
+			// Веса откалиброваны экспериментально на корпусе GraphQL-схем из 12 OSS-проектов
+			// с реалистичным распределением мутаций (см. markup/experiments/vp_tree_metric_subsets/REPORT.md).
+			// Прежние веса (0.20/0.40/0.20/0.10/0.10) давали Top-1 = 0.9154 на N=3000.
+			// Текущие  (0.15/0.30/0.35/0.15/0.05) дают Top-1 = 0.9485 (+3.31 pp),
+			// в 1.6× лучше прунинг VP-tree и в 1.5× быстрее запрос.
+			// Главное изменение: вес Returns поднят с 0.20 до 0.35, потому что тип
+			// возврата устойчивее имени к rename-операциям (которые составляют ~45%
+			// всех мутаций в реальных GraphQL-репозиториях).
+			public double NameW    = 0.15;
+			public double ArgsW    = 0.30;
+			public double ReturnsW = 0.35;
+			public double ParentW  = 0.15;
+			public double NeighW   = 0.05;
 
-			public int NameScale = 8;
-			public int TypeScale = 16;
-			public int ArgNameScale = 8;
-			public int ReturnsScale = 16;
+			public int NameScale     = 8;
+			public int TypeScale     = 16;
+			public int ArgNameScale  = 8;
+			public int ReturnsScale  = 16;
 			public int ReceiverScale = 8;
 		}
 
