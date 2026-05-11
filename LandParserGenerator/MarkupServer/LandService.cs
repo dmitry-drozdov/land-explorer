@@ -126,7 +126,76 @@ namespace MarkupServer
 			=> roots?.Select(ToClientNodeV2).Where(x => x != null).ToList() ?? new List<TreeNodeClientV2>();
 
 		private ListTreeResultV2 MakeListTreeResult(List<TreeNode> roots, bool? fromCache)
-			=> new ListTreeResultV2 { r = ToClientRootsV2(roots), fc = fromCache };
+			=> new ListTreeResultV2
+			{
+				r = ToClientRootsV2(roots),
+				fc = fromCache,
+				links = BuildClientUserLinks(),
+			};
+
+		/// <summary>
+		/// Все пользовательские (не auto-pair) связи в формате клиента — для embed
+		/// в listAnchors-ответе. Peer-info заполняется из nodesById; если peer
+		/// в _Lost — берётся из LostAnchors с флагом lost=true.
+		/// </summary>
+		private List<LinkClientV2> BuildClientUserLinks()
+		{
+			var links = currentMarkup?.Links;
+			if (links == null || links.Count == 0)
+				return new List<LinkClientV2>();
+
+			var lostByAnchorId = (currentMarkup?.LostAnchors ?? new List<LostAnchor>())
+				.Where(l => l != null && !string.IsNullOrWhiteSpace(l.AnchorId))
+				.GroupBy(l => l.AnchorId, StringComparer.OrdinalIgnoreCase)
+				.ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+			var result = new List<LinkClientV2>(links.Count);
+			foreach (var l in links)
+			{
+				if (l == null) continue;
+				if (string.Equals(l.Kind, AutoPairKind, StringComparison.Ordinal)) continue;
+
+				// Для embed мы рисуем ОБЕ стороны через target — UI решит, кто peer
+				// в зависимости от того, для какого якоря показываются связи.
+				// Берём target как "peer" по умолчанию (соответствует outgoing-семантике).
+				var peerId = l.TargetAnchorId;
+				TreeNode peer = null;
+				bool peerLost = false;
+
+				if (!string.IsNullOrWhiteSpace(peerId))
+				{
+					if (nodesById.TryGetValue(peerId, out var live) && live != null)
+						peer = live;
+					else if (lostByAnchorId.TryGetValue(peerId, out var lost))
+					{
+						peer = new TreeNode
+						{
+							Id = lost.AnchorId,
+							Name = lost.Name,
+							NodeType = "anchor",
+							Filepath = lost.Filepath,
+							AnchorKind = lost.AnchorKind,
+						};
+						peerLost = true;
+					}
+				}
+
+				result.Add(new LinkClientV2
+				{
+					id = l.Id,
+					src = l.SourceAnchorId,
+					tgt = l.TargetAnchorId,
+					kind = string.IsNullOrWhiteSpace(l.Kind) ? null : l.Kind,
+					label = string.IsNullOrWhiteSpace(l.Label) ? null : l.Label,
+					pn = peer?.Name,
+					pf = peer?.Filepath,
+					ps = peer?.StartOffset,
+					pk = peer?.AnchorKind,
+					lost = peerLost ? true : (bool?)null,
+				});
+			}
+			return result;
+		}
 
 		private UpdateAnchorResultV2 MakeUpdateAnchorResult(
 			TreeNode updated,

@@ -99,6 +99,11 @@ namespace MarkupServer
 	{
 		public List<TreeNodeClientV2> r { get; set; }
 		public bool? fc { get; set; }
+		/// <summary>
+		/// Все user-links (без системных auto-pair). Embedded в ответе listAnchors,
+		/// чтобы клиент мог фильтровать/искать по Label/Kind связей без отдельного RPC.
+		/// </summary>
+		public List<LinkClientV2> links { get; set; }
 	}
 
 	public class UpdateAnchorResultV2
