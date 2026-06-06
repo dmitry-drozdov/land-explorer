@@ -118,8 +118,25 @@ namespace MarkupServer
             public List<CoupledRebindCandidateDto> colB { get; set; }
             /// <summary>Матрица K_A × K_B значений SoftPairScore (для подсветки и предупреждений).</summary>
             public List<List<double>> matrix { get; set; }
+            /// <summary>Топ-N наиболее вероятных пар по power-norm ранжированию (см. PairRanking).</summary>
+            public List<ScoredPairDto> topPairs { get; set; }
             /// <summary>Почему ушли в picker (для UI: «алгоритм не уверен потому что…»).</summary>
             public string reason { get; set; }
+        }
+
+        /// <summary>Одна пара из топ-N: индексы в колонках + покомпонентные скоры + финальный ранг.</summary>
+        public sealed class ScoredPairDto
+        {
+            public int aIdx { get; set; }
+            public int bIdx { get; set; }
+            public double s1A { get; set; }
+            public double s1B { get; set; }
+            /// <summary>P_A(a) = S1_A(a)² / Σ S1_A² — нормализованная доля кандидата A.</summary>
+            public double pA { get; set; }
+            /// <summary>P_B(b) = S1_B(b)² / Σ S1_B².</summary>
+            public double pB { get; set; }
+            public double p { get; set; }
+            public double rank { get; set; }
         }
 
         // ---------- Главный метод алгоритма ----------
@@ -246,6 +263,28 @@ namespace MarkupServer
             }
 
             // Picker
+            var matrix = BuildMatrix(colA, colB);
+            var s1AList = colA.Select(c => c.S1).ToArray();
+            var s1BList = colB.Select(c => c.S1).ToArray();
+            var topScored = PairRanking.RankTopN(
+                s1AList,
+                s1BList,
+                matrix.Select(r => (IReadOnlyList<double>)r).ToList(),
+                topN: 5,
+                k: PairRanking.DEFAULT_K,
+                tauPair: TAU_PAIR);
+            var topPairsDto = topScored.Select(sp => new ScoredPairDto
+            {
+                aIdx = sp.AIdx,
+                bIdx = sp.BIdx,
+                s1A = sp.S1A,
+                s1B = sp.S1B,
+                pA = sp.PA,
+                pB = sp.PB,
+                p = sp.P,
+                rank = sp.Rank,
+            }).ToList();
+
             return new CoupledRebindResultDto
             {
                 kind = "picker",
@@ -261,7 +300,8 @@ namespace MarkupServer
                     n = ToClientNodeV2(c.Node),
                     s1 = c.S1,
                 }).ToList(),
-                matrix = BuildMatrix(colA, colB),
+                matrix = matrix,
+                topPairs = topPairsDto,
                 reason = string.Join("; ", failed),
             };
         }
@@ -499,8 +539,8 @@ namespace MarkupServer
         }
 
         /// <summary>
-        /// Строит TreeNode по filePath + startOffset (определяет язык по
-        /// расширению и делегирует существующим TryCreateBindable*AtOffset).
+        /// Строит TreeNode по filePath + startOffset, делегируя существующему
+        /// TryCreateManualAnchorAtOffset (он сам разрулит расширение).
         /// </summary>
         private TreeNode BuildNodeFromTarget(CoupledRebindTargetDto t, out string message)
         {
