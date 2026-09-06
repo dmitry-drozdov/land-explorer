@@ -3,7 +3,7 @@
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
+    <Nullable>disable</Nullable>
 
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
@@ -18,6 +18,14 @@
 
   <ItemGroup>
     <ProjectReference Include="..\VPTreeLib\VPTreeLib.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Реальный корпус: 1956 полей GraphQL из 12 OSS-проектов.
+         Копия markup/experiments/_data/anchors_object.json (md5 см. TestData/README.md). -->
+    <None Include="TestData\**\*.*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 
 </Project>

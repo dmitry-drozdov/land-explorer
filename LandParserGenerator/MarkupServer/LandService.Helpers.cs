@@ -111,14 +111,19 @@ namespace MarkupServer
 			return s.Trim().Trim(',');
 		}
 
+		/// <summary>
+		/// Текст узла по его Location. В LanD Location.End.Offset указывает на ПОСЛЕДНИЙ символ
+		/// узла (включительно), поэтому длина среза = end - start + 1. Прежняя реализация
+		/// считала конец исключительным и теряла последний символ ("Deal!" → "Deal", "Deal" → "Dea").
+		/// </summary>
 		private static string Slice(Node n, string text)
 		{
 			if (n == null || text == null || n.Location == null)
 				return "";
 			var start = Math.Max(0, n.Location.Start.Offset);
-			var end = Math.Min(text.Length, n.Location.End.Offset);
-			if (end < start) end = start;
-			return text.Substring(start, end - start);
+			var endInclusive = Math.Min(text.Length - 1, n.Location.End.Offset);
+			if (endInclusive < start) return "";
+			return text.Substring(start, endInclusive - start + 1);
 		}
 
 		private static List<Node> GetGqlTypeDefs(Node root)
@@ -152,6 +157,20 @@ namespace MarkupServer
 				: "";
 		}
 
+		/// <summary>
+		/// Какие поля GraphQL становятся якорями. По умолчанию — все поля типа (func_line и type_line):
+		/// точка привязки = поле схемы, как в экспериментальном корпусе. Прежнее поведение
+		/// (только поля с аргументами, func_line) включается переменной окружения LAND_GQL_FIELDS=callable.
+		/// </summary>
+		internal static bool GqlFieldAnchorsIncludePlain =
+			!string.Equals(Environment.GetEnvironmentVariable("LAND_GQL_FIELDS"), "callable", StringComparison.OrdinalIgnoreCase);
+
+		private static bool IsGqlFieldLine(Node n)
+		{
+			var t = n?.ToString();
+			return t == "func_line" || (GqlFieldAnchorsIncludePlain && t == "type_line");
+		}
+
 		private static IEnumerable<Node> GetGqlFieldNodes(Node typeDef)
 		{
 			if (typeDef?.Children == null)
@@ -159,9 +178,25 @@ namespace MarkupServer
 
 			foreach (var child in typeDef.Children)
 			{
-				if (child?.ToString() == "func_line")
+				if (IsGqlFieldLine(child))
 					yield return child;
 			}
+		}
+
+		/// <summary>
+		/// Текст типа GraphQL как в исходнике (например, "[Deal!]!"). Раньше брался ToString()
+		/// первого потомка узла type, что для составных типов давало литерал "type".
+		/// </summary>
+		private static string GetGqlTypeText(Node typeNode, string sourceText)
+		{
+			if (typeNode == null)
+				return "";
+			var s = Slice(typeNode, sourceText);
+			if (!string.IsNullOrWhiteSpace(s))
+				return s.Trim();
+			// запасной путь без исходного текста
+			var first = typeNode.Children?.FirstOrDefault(y => y != null && y.ToString() != "LSB: [");
+			return (first?.ToString() ?? "").Replace("id: ", "", StringComparison.OrdinalIgnoreCase);
 		}
 
 		private static List<GqlMemberSketch> ExtractGqlMembers(Node typeDef, string text)
@@ -453,12 +488,12 @@ namespace MarkupServer
 
 			if (best == null)
 			{
-				message = "В позиции курсора не найдена bindable-сущность GraphQL (поддерживаются только type_def и func_line).";
+				message = "В позиции курсора не найдена bindable-сущность GraphQL (поддерживаются type_def и поля типа).";
 				return null;
 			}
 
-			if (string.Equals(best.Node.ToString(), "func_line", StringComparison.OrdinalIgnoreCase))
-				return GetTreeNodeFromGqlFieldNode(best.Node, filePath, best.ParentTypeName, best.GqlTypeKind);
+			if (IsGqlFieldLine(best.Node))
+				return GetTreeNodeFromGqlFieldNode(best.Node, filePath, best.ParentTypeName, best.GqlTypeKind, txt);
 
 			return GetTreeNodeFromGqlTypeNode(best.Node, filePath, best.GqlTypeKind, txt);
 		}
@@ -526,6 +561,17 @@ namespace MarkupServer
 
 		private TreeNode RebindAnchorAgainstCurrentForests(TreeNode oldNode)
 		{
+			return RebindAnchorAgainstCurrentForests(oldNode, out _);
+		}
+
+		/// <summary>
+		/// Перепривязка якоря к текущему лесу профиля с правилом приёма (tau, margin).
+		/// Возвращает новый узел только при статусе Accepted; при Ambiguous/Lost — null,
+		/// подробности в <paramref name="decision"/>.
+		/// </summary>
+		private TreeNode RebindAnchorAgainstCurrentForests(TreeNode oldNode, out RebindDecision decision)
+		{
+			decision = new RebindDecision { Status = RebindStatus.Lost, Reason = "no index" };
 			if (oldNode == null)
 				return null;
 
@@ -544,12 +590,14 @@ namespace MarkupServer
 			if (query == null)
 				return null;
 
-			var cands = tree.KNearest(query, 1);
-			if (cands == null || cands.Count == 0)
+			var settings = RebindSettings.Default;
+			var cands = tree.KNearest(query, Math.Max(2, settings.K));
+			decision = DecideFor(cands, settings.Tau, settings.MinRelativeMargin);
+			Debug($"[rebind] '{oldNode.Name}' profile={profileKey} status={decision.Status} {decision.Reason}");
+			if (decision.Status != RebindStatus.Accepted)
 				return null;
 
-			var best = cands[0];
-			var rebound = CloneAnchor(nodes[best.Index]);
+			var rebound = CloneAnchor(nodes[decision.BestIndex]);
 			rebound.Id = oldNode.Id;
 			rebound.IsManual = oldNode.IsManual;
 			rebound.Comment = oldNode.Comment;
@@ -591,19 +639,26 @@ namespace MarkupServer
 			};
 		}
 
-		private TreeNode GetTreeNodeFromGqlFieldNode(Node n, string filepath, string parentTypeName, string gqlTypeKind)
+		private TreeNode GetTreeNodeFromGqlFieldNode(Node n, string filepath, string parentTypeName, string gqlTypeKind, string sourceText)
 		{
 			filepath = Path.GetFullPath(filepath);
 			var name = n.Children.First().ToString().Replace("id: ", "", StringComparison.OrdinalIgnoreCase);
 
-			var args = n.Children.Skip(1)
-				.TakeWhile(x => x.Type == "func_arg")
-				.Select(x => new Tuple<string, string>(
-					x.Children[0].Children[1].Children.First(y => y.ToString() != "LSB: [").ToString().Replace("id: ", "", StringComparison.OrdinalIgnoreCase),
-					x.Children[0].Children[0].ToString().Replace("id: ", "", StringComparison.OrdinalIgnoreCase)
-				));
+			// func_line = id '(' func_arg* ')' ':' type ...;  type_line = id ':' type default_value? ...
+			// func_arg = type_line → [id, type, default_value?]
+			var args = n.Children
+				.Where(x => x != null && x.Type == "func_arg")
+				.Select(x =>
+				{
+					var line = x.Children?.FirstOrDefault();
+					var argName = (line?.Children?.FirstOrDefault()?.ToString() ?? "").Replace("id: ", "", StringComparison.OrdinalIgnoreCase);
+					var typeNode = line?.Children?.FirstOrDefault(c => c != null && c.ToString() == "type");
+					return new Tuple<string, string>(GetGqlTypeText(typeNode, sourceText), argName);
+				})
+				.ToList();
 
-			var returnType = n.Children.Last().Children.First(y => y.ToString() != "LSB: [").ToString().Replace("id: ", "", StringComparison.OrdinalIgnoreCase);
+			var retNode = n.Children.LastOrDefault(c => c != null && c.ToString() == "type");
+			var returnType = GetGqlTypeText(retNode, sourceText);
 			var start = n.Location.Start.Offset;
 			var end = n.Location.End.Offset;
 
@@ -731,20 +786,25 @@ namespace MarkupServer
 					count++;
 
 					var fieldAnchors = GetGqlFieldNodes(typeDef)
-						.Select(x => GetTreeNodeFromGqlFieldNode(x, gqlFile, typeName, gqlTypeKind))
+						.Select(x => GetTreeNodeFromGqlFieldNode(x, gqlFile, typeName, gqlTypeKind, txt))
 						.ToList();
 
 					for (var i = 0; i < fieldAnchors.Count; i++)
 					{
 						var fieldAnchor = fieldAnchors[i];
 						fieldAnchor.OrdinalInParent = i;
-						fieldAnchor.NeighborBag = BuildFieldNeighborBag(fieldAnchors, i);
 						gqlAnchors.Add(fieldAnchor);
 						nodesById[fieldAnchor.Id] = fieldAnchor;
 						count++;
 					}
 				}
 			}
+
+			// Мешки соседей — единой реализацией VPTreeLib по всем полям проекта
+			// (группировка по файлу и родителю, IDF по всему набору).
+			AssignNeighborBags(gqlAnchors
+				.Where(x => string.Equals(x.AnchorKind, AnchorKindGqlField, StringComparison.OrdinalIgnoreCase))
+				.ToList());
 			return count;
 		}
 
@@ -1401,11 +1461,23 @@ namespace MarkupServer
 			nodesById.Clear();
 			Tracing.Init();
 
-			var gqlFiles = GetAllFiles(currentFolderPath, "graphql");
+			// Детерминизм: порядок обхода файловой системы не должен влиять на результат,
+			// поэтому списки файлов сортируются. Схемы: *.graphql, *.gql, *.graphqls.
+			var gqlFiles = new[] { "graphql", "gql", "graphqls" }
+				.SelectMany(ext => GetAllFiles(currentFolderPath, ext))
+				.Where(x => x.EndsWith(".graphql", StringComparison.OrdinalIgnoreCase)
+					|| x.EndsWith(".gql", StringComparison.OrdinalIgnoreCase)
+					|| x.EndsWith(".graphqls", StringComparison.OrdinalIgnoreCase))
+				.Distinct(StringComparer.OrdinalIgnoreCase)
+				.OrderBy(x => x, StringComparer.Ordinal)
+				.ToList();
 			using (var scope = Tracing.Tracer.BuildSpan("ProcessGqlFiles").StartActive())
 				ParseGqlFiles(gqlFiles, gqlAnchors);
 
-			var tsFiles = GetAllFiles(currentFolderPath, "ts");
+			var tsFiles = GetAllFiles(currentFolderPath, "ts")
+				.Where(x => x.EndsWith(".ts", StringComparison.OrdinalIgnoreCase))
+				.OrderBy(x => x, StringComparer.Ordinal)
+				.ToList();
 			using (var scope = Tracing.Tracer.BuildSpan("ProcessTsFiles").StartActive())
 			{
 				foreach (var tsFile in tsFiles)
@@ -1423,6 +1495,9 @@ namespace MarkupServer
 						}
 					}
 				}
+
+				// Раньше у TS-якорей NeighborBag не строился вовсе (аудит 2026-08, §3.4).
+				AssignNeighborBags(tsAnchors);
 			}
 		}
 
@@ -1462,10 +1537,20 @@ namespace MarkupServer
 
 		internal sealed class StitchSettings
 		{
-			/// <summary>Порог дистанции для callable-профилей (gqlField, tsMember). 0 = слой 2 выключен.</summary>
-			public double MaxDistanceCallable = 0.0;
-			/// <summary>Порог дистанции для record-профилей (gqlTypeDef, gqlInputDef, gqlInterfaceDef). 0 = слой 2 выключен.</summary>
-			public double MaxDistanceRecord = 0.0;
+			/// <summary>
+			/// Порог дистанции для callable-профилей (gqlField, tsMember). 0 = слой 2 выключен.
+			/// До сентября 2026 был 0.0 (слой отключён). Калибровка по risk–coverage на tune-части
+			/// корпуса реальной истории (experiments/e05): tau 0.30 + margin 0.30 → покрытие 98.4 %,
+			/// ошибочных автопривязок 0.08 %.
+			/// </summary>
+			public double MaxDistanceCallable = RebindSettings.ReadEnvDouble("LAND_STITCH_TAU", 0.30);
+			/// <summary>
+			/// Порог для record-профилей (gqlTypeDef, gqlInputDef, gqlInterfaceDef). Веса record-профиля
+			/// не калибровались; значение предварительное.
+			/// </summary>
+			public double MaxDistanceRecord = RebindSettings.ReadEnvDouble("LAND_STITCH_TAU_RECORD", 0.45);
+			/// <summary>Минимальный относительный отрыв второго кандидата (d2 - d1) / d2.</summary>
+			public double MinRelativeMargin = RebindSettings.ReadEnvDouble("LAND_STITCH_MARGIN", 0.30);
 
 			public static StitchSettings Default => new StitchSettings();
 
@@ -1645,6 +1730,10 @@ namespace MarkupServer
 						Tracing.Tracer);
 				}
 
+				// Сначала решения для всех несопоставленных старых якорей (tau + margin),
+				// затем назначение один-к-одному в порядке возрастания дистанции: самые
+				// очевидные соответствия занимают кандидатов первыми (как в RebindEngine).
+				var proposals = new List<(TreeNode Prev, TreeNode Fresh, double Dist)>();
 				foreach (var p in unclaimedPrev)
 				{
 					if (!CanParticipateInRebinding(p))
@@ -1677,30 +1766,25 @@ namespace MarkupServer
 						continue;
 					}
 
-					var cands = tree.KNearest(query, 1);
-					if (cands == null || cands.Count == 0)
+					var cands = tree.KNearest(query, 2);
+					var decision = DecideFor(cands, threshold, settings.MinRelativeMargin);
+					if (decision.Status != RebindStatus.Accepted
+						|| decision.BestIndex < 0 || decision.BestIndex >= profileNodes.Count)
 					{
+						Debug($"[stitch] '{p.Name}' {decision.Status}: {decision.Reason}");
 						result.Lost.Add(p.Id);
 						continue;
 					}
 
-					var best = cands[0];
-					if (best.Index < 0 || best.Index >= profileNodes.Count)
-					{
-						result.Lost.Add(p.Id);
-						continue;
-					}
+					proposals.Add((p, profileNodes[decision.BestIndex], decision.BestDist));
+				}
 
-					if (best.Dist > threshold)
-					{
-						result.Lost.Add(p.Id);
-						continue;
-					}
-
-					var freshNode = profileNodes[best.Index];
+				foreach (var (p, freshNode, dist) in proposals.OrderBy(x => x.Dist).ThenBy(x => x.Prev.Id, StringComparer.Ordinal))
+				{
 					if (claimedFresh.Contains(freshNode))
 					{
-						// Уже сматчился ближе — этот теряется.
+						// Кандидат уже занят более близким старым якорем — этот теряется.
+						Debug($"[stitch] '{p.Name}' Lost: candidate '{freshNode.Name}' already claimed");
 						result.Lost.Add(p.Id);
 						continue;
 					}
@@ -1709,7 +1793,7 @@ namespace MarkupServer
 					freshNode.Id = p.Id;
 					freshNode.Comment = p.Comment;
 					claimedFresh.Add(freshNode);
-					result.MatchedFuzzy.Add((p.Id, replacedId, best.Dist));
+					result.MatchedFuzzy.Add((p.Id, replacedId, dist));
 				}
 			}
 			else

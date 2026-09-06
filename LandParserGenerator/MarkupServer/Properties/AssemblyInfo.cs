@@ -8,6 +8,7 @@ using System.Runtime.InteropServices;
 // для компонентов COM. Если необходимо обратиться к типу в этой сборке через
 // из модели COM задайте для атрибута ComVisible этого типа значение true.
 [assembly: ComVisible(false)]
+[assembly: InternalsVisibleTo("MarkupServer.Tests")]
 
 // Следующий GUID представляет идентификатор typelib, если этот проект доступен из модели COM
 [assembly: Guid("8d0ed116-3cbe-4e78-bbe7-2f675ae40af5")]

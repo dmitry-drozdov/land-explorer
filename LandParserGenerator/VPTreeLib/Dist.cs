@@ -13,25 +13,45 @@ namespace VPTree
 	{
 		public sealed class Weights
 		{
-			// Веса откалиброваны экспериментально на корпусе GraphQL-схем из 12 OSS-проектов
-			// с реалистичным распределением мутаций (см. markup/experiments/vp_tree_metric_subsets/REPORT.md).
-			// Прежние веса (0.20/0.40/0.20/0.10/0.10) давали Top-1 = 0.9154 на N=3000.
-			// Текущие  (0.15/0.30/0.35/0.15/0.05) дают Top-1 = 0.9485 (+3.31 pp),
-			// в 1.6× лучше прунинг VP-tree и в 1.5× быстрее запрос.
-			// Главное изменение: вес Returns поднят с 0.20 до 0.35, потому что тип
-			// возврата устойчивее имени к rename-операциям (которые составляют ~45%
-			// всех мутаций в реальных GraphQL-репозиториях).
-			public double NameW    = 0.15;
-			public double ArgsW    = 0.30;
-			public double ReturnsW = 0.35;
+			// Веса подобраны на tune-части корпуса РЕАЛЬНОЙ git-истории GraphQL-схем
+			// (markup/experiments/e02_weight_retune/REPORT.md, сентябрь 2026; репозитории circuit, boost,
+			// SlabAPI, bramble, HydroAPI; критерий — Top-1 по сложным случаям при Top-1 по всем запросам
+			// не ниже прежнего). Прежние веса 0.15/0.30/0.35/0.15/0.05 были подобраны на синтетических
+			// мутациях, которые недооценивали контекст соседей: на реальных переименованиях типов и полей
+			// они давали 0.714 против 0.864 (tune) и 0.936 против 0.948 (test) по сложным случаям.
+			// Главное изменение: вес соседей поднят с 0.05 до 0.35, Returns снижен с 0.35 до 0.20,
+			// Args — с 0.30 до 0.10 (на GraphQL компонента почти не несёт информации, e06).
+			public double NameW    = 0.20;
+			public double ArgsW    = 0.10;
+			public double ReturnsW = 0.20;
 			public double ParentW  = 0.15;
-			public double NeighW   = 0.05;
+			public double NeighW   = 0.35;
 
 			public int NameScale     = 8;
 			public int TypeScale     = 16;
 			public int ArgNameScale  = 8;
 			public int ReturnsScale  = 16;
 			public int ReceiverScale = 8;
+
+			/// <summary>
+			/// Нормировка ArgsDistance. Constant (по умолчанию) — постоянный знаменатель
+			/// ArgMaxCount·(wt+wn) с усечением сверху: результат остаётся метрикой.
+			/// Legacy — прежняя нормировка на max(|A|,|B|): НЕ метрика (нарушает
+			/// неравенство треугольника, см. Marzal &amp; Vidal 1993 для normalized edit distance).
+			/// Legacy оставлен только для воспроизведения результатов «до исправления».
+			/// </summary>
+			public ArgsNormalization ArgsNorm = ArgsNormalization.Constant;
+
+			/// <summary>Постоянная арность-нормировка для ArgsDistance в режиме Constant.</summary>
+			public int ArgMaxCount = 8;
+		}
+
+		public enum ArgsNormalization
+		{
+			/// <summary>Постоянный знаменатель ArgMaxCount·(wt+wn) + усечение до 1: метрика.</summary>
+			Constant,
+			/// <summary>Знаменатель max(|A|,|B|)·(wt+wn): не метрика. Только для сравнения «до/после».</summary>
+			Legacy,
 		}
 
 		public static int Lev(string a, string b)
@@ -635,7 +655,20 @@ namespace VPTree
 
 		public static double ArgNullCost(double wType, double wName) { return wType + wName; }
 
-		// Hungarian-based permutation-invariant distance
+		// Hungarian-based permutation-invariant distance.
+		//
+		// Метричность (режим Constant):
+		//  * ArgPairCost = wt·LevScaled(type) + wn·LevScaled(name) — сумма метрик, метрика;
+		//    её максимум равен wt + wn = 1.5.
+		//  * Стоимость назначения с дополнением фиктивными элементами по цене nullCost
+		//    есть метрика на мультимножествах аргументов при любом nullCost ≥ 0,
+		//    если разрешено оставлять элементы несопоставленными (композиция паросочетаний
+		//    даёт оценку сверху по неравенству треугольника для ground-метрики).
+		//    Полное назначение (все элементы меньшего списка обязаны быть сопоставлены),
+		//    которое строит матрица ниже, совпадает с этой величиной, когда
+		//    max ArgPairCost ≤ 2·nullCost, т.е. 1.5 ≤ 2.0 — выполняется.
+		//  * Деление на КОНСТАНТУ и усечение min(d, c) сохраняют метричность.
+		// Прежняя нормировка на переменный n = max(|A|,|B|) метричность ломала.
 		public static double ArgsDistance(List<MethodAnchor.Arg> A, List<MethodAnchor.Arg> B, Weights w)
 		{
 			if (A == null) A = new List<MethodAnchor.Arg>();
@@ -658,7 +691,15 @@ namespace VPTree
 				}
 
 			double total = Hungarian.MinCost(C);
-			return total / (double)(n * (wt + wn));
+
+			if (w.ArgsNorm == ArgsNormalization.Legacy)
+				return total / (double)(n * (wt + wn));
+
+			int aMax = w.ArgMaxCount;
+			if (aMax < 1) aMax = 1;
+			double denom = aMax * (wt + wn);
+			if (total > denom) total = denom; // усечение константой: метрика сохраняется, диапазон [0,1]
+			return total / denom;
 		}
 
 		public static string NeighborSigKey(MethodAnchor m)

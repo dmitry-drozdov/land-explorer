@@ -20,6 +20,9 @@ namespace VPTree
 		public List<Arg> Args;
 		public int OrdinalInParent { get; set; }
 		public Dictionary<string, double> NeighborBag { get; set; }
+		/// <summary>Файл (относительный путь), из которого извлечён якорь. Не участвует в метрике;
+		/// нужен для группировки соседей в пределах одного файла и для канонического порядка.</summary>
+		public string File { get; set; }
 
 		public sealed class Arg
 		{

@@ -58,13 +58,20 @@ namespace MarkupServer
 			}
 
 			var query = BuildAnchorContext(oldNode);
-			var cands = tree.KNearest(query, 1);
-			if (cands == null || cands.Count == 0)
+			var settings = RebindSettings.Default;
+			var cands = tree.KNearest(query, Math.Max(2, settings.K));
+			var decision = DecideFor(cands, settings.Tau, settings.MinRelativeMargin);
+			if (decision.Status != RebindStatus.Accepted)
+			{
+				// Раньше ближайший кандидат принимался безусловно (аудит 2026-08, §3.2.2).
+				// Теперь при Ambiguous/Lost якорь не переносится: молчаливая ошибочная привязка
+				// хуже отказа.
+				Debug($"[updateAnchor] profile={profileKey} status={decision.Status} {decision.Reason} -> not rebound");
 				return Task.FromResult(MakeUpdateAnchorResult(null));
+			}
 
-			var best = cands[0];
-			var newNode = nodes[best.Index];
-			Debug($"[updateAnchor] profile={profileKey} dist={best.Dist} -> {newNode?.Filepath}:{newNode?.StartOffset}-{newNode?.EndOffset} {newNode?.Name}");
+			var newNode = nodes[decision.BestIndex];
+			Debug($"[updateAnchor] profile={profileKey} status=Accepted {decision.Reason} -> {newNode?.Filepath}:{newNode?.StartOffset}-{newNode?.EndOffset} {newNode?.Name}");
 
 			var updated = CloneAnchor(newNode);
 			updated.Id = p.anchorId;

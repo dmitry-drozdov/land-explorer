@@ -1,20 +1,30 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.Linq;
 using System.Runtime.CompilerServices;
-using System.Text;
-using System.Threading;
 using System.Threading.Tasks;
 using OpenTracing;
-using OpenTracing.Util;
 
 
 namespace VPTree
 {
 	// =======================
-	// VP-Tree (exact kNN)
+	// VP-Tree (Yianilos 1993), точный kNN при условии, что distance — (псевдо)метрика.
+	//
+	// Гарантии:
+	//  * Отсечение ветвей опирается только на неравенство треугольника, поэтому при
+	//    метричной функции расстояния результат KNearest совпадает с полным перебором.
+	//  * Порядок среди равных расстояний канонический: (distance, index), где index —
+	//    позиция элемента во входном списке. Следовательно результат детерминирован
+	//    и не зависит от формы дерева; чтобы он не зависел и от окружения, вызывающая
+	//    сторона должна подавать элементы в каноническом порядке (см. CanonicalOrder).
+	//  * Построение детерминировано: опорные точки выбираются генератором с фиксированным
+	//    seed, распараллеливание затрагивает только вычисление массива расстояний.
+	//
+	// Обобщённый класс ничего не знает о MethodAnchor: никаких скрытых достроек
+	// NeighborBag и подмен запроса здесь нет (раньше были — они делали поведение
+	// прототипа и сервера различным).
 	// =======================
 	public sealed partial class VPTree<T>
 	{
@@ -30,13 +40,12 @@ namespace VPTree
 		private readonly Func<T, T, double> _dist;
 		private readonly Node _root;
 		private readonly Random _rng;
-
-		// Query-time normalization: if a query MethodAnchor has an empty NeighborBag,
-		// try to copy the bag from an identical signature already present in the index.
-		// This prevents a systematic +NeighW penalty (e.g., +0.1) for unchanged points.
-		private Dictionary<string, MethodAnchor> _sigIndex;
+		private readonly object _rngLock = new object();
 
 		public int BuildDepth { get; private set; }
+
+		/// <summary>Число элементов в индексе.</summary>
+		public int Count => _items.Count;
 
 		public VPTree(IList<T> items, Func<T, T, double> distance, int? seed = null, ITracer tracer = null)
 		{
@@ -47,99 +56,12 @@ namespace VPTree
 			var idxs = Enumerable.Range(0, _items.Count).ToList();
 			using (var scope = tracer?.BuildSpan("Build").StartActive())
 			{
-				MaybeBuildNeighborBags();
-				EnsureSigIndexBuilt();
-
 				_root = Build(idxs);
 				BuildDepth = ComputeDepth(_root);
 				if (scope != null)
 				{
 					scope.Span.SetTag("vptree.build.depth", BuildDepth);
 				}
-			}
-		}
-
-		private readonly object _rngLock = new object();
-
-		/// <summary>
-		/// If the tree is built over MethodAnchor and NeighborBag is mostly empty, build simple neighbor bags
-		/// so the Neigh component can participate in the metric. This is a no-op if bags look already built.
-		/// </summary>
-		/// <summary>
-		/// If the tree is built over MethodAnchor and NeighborBag is mostly empty, build simple neighbor bags
-		/// so the Neigh component can participate in the metric. This is a no-op if bags look already built.
-		/// </summary>
-		private void MaybeBuildNeighborBags()
-		{
-			// Only meaningful if T is MethodAnchor (or subtype).
-			int inspected = 0;
-			int preNonEmpty = 0;
-
-			for (int i = 0; i < _items.Count; i++)
-			{
-				if (!(_items[i] is MethodAnchor ma)) continue;
-				inspected++;
-				if (ma.NeighborBag != null && ma.NeighborBag.Count > 0) preNonEmpty++;
-			}
-
-			if (inspected == 0) return;
-
-			// If >=10% are already non-empty, assume caller already built bags.
-			if (preNonEmpty * 10 >= inspected) return;
-
-			// Build bags for all anchors we can see.
-			var anchors = new List<MethodAnchor>(inspected);
-			for (int i = 0; i < _items.Count; i++)
-			{
-				if (_items[i] is MethodAnchor ma) anchors.Add(ma);
-			}
-
-			AnchorsIO.BuildNeighborBags(anchors, window: 4);
-		}
-
-		/// <summary>
-		/// Builds a lookup from method "signature" (receiver + name + return + args) to an existing anchor.
-		/// Used to normalize query anchors that do not carry NeighborBag (otherwise Neigh component adds a constant penalty).
-		/// </summary>
-		private void EnsureSigIndexBuilt()
-		{
-			if (_sigIndex != null) return;
-
-			var dict = new Dictionary<string, MethodAnchor>(StringComparer.Ordinal);
-			for (int i = 0; i < _items.Count; i++)
-			{
-				if (!(_items[i] is MethodAnchor ma)) continue;
-				string key = SigKey(ma);
-				if (dict.TryGetValue(key, out var existing))
-				{
-					// Prefer a non-empty NeighborBag exemplar if we have one.
-					bool exEmpty = existing?.NeighborBag == null || existing.NeighborBag.Count == 0;
-					bool maEmpty = ma?.NeighborBag == null || ma.NeighborBag.Count == 0;
-					if (exEmpty && !maEmpty) dict[key] = ma;
-				}
-				else
-				{
-					dict[key] = ma;
-				}
-			}
-
-			_sigIndex = dict;
-		}
-
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		private void PrepareQueryIfNeeded(T query)
-		{
-			if (!(query is MethodAnchor q)) return;
-			if (q.NeighborBag != null && q.NeighborBag.Count > 0) return;
-
-			EnsureSigIndexBuilt();
-			if (_sigIndex == null) return;
-
-			string key = SigKey(q);
-			if (_sigIndex.TryGetValue(key, out var src) && src != null && src.NeighborBag != null && src.NeighborBag.Count > 0)
-			{
-				// Copy, so external code can't accidentally mutate the tree's exemplar bag.
-				q.NeighborBag = new Dictionary<string, double>(src.NeighborBag);
 			}
 		}
 
@@ -155,30 +77,6 @@ namespace VPTree
 			int rd = ComputeDepth(node.Right);
 			return 1 + (ld > rd ? ld : rd);
 		}
-
-
-		private static string ArgsKey(MethodAnchor m)
-		{
-			if (m == null || m.Args == null || m.Args.Count == 0) return "";
-			// keep order; names are already normalized
-			var sb = new StringBuilder(m.Args.Count * 16);
-			for (int i = 0; i < m.Args.Count; i++)
-			{
-				var a = m.Args[i];
-				if (i > 0) sb.Append('|');
-				sb.Append(a?.TypeNorm ?? "").Append(':').Append(a?.NameNorm ?? "");
-			}
-			return sb.ToString();
-		}
-
-		private static string SigKey(MethodAnchor m)
-		{
-			if (m == null) return "";
-			// Receiver + name + return + args: should uniquely identify a method in most codebases
-			return (m.ParentNameNorm ?? "") + "|" + (m.MethodNameNorm ?? "") + "|" + (m.ReturnTypeNorm ?? "") + "|" + ArgsKey(m);
-		}
-
-
 
 		private Node BuildInternal(List<int> idxs, int parallelDepth)
 		{
@@ -209,21 +107,27 @@ namespace VPTree
 			int n = idxs.Count - 1;
 			var dists = new double[n];
 
-			var opts = new ParallelOptions
-			{
-				MaxDegreeOfParallelism = 14 // стартовое значение для 16 логических
-			};
-
-			const int chunkSize = 16; // попробуй 64 и 128, выбери быстрее
-
 			var vp = _items[vpIndex];
 			var items = _items;
 			var dist = _dist;
-			Parallel.ForEach(Partitioner.Create(0, n, chunkSize), opts, range =>
+
+			// Распараллеливаем только вычисление расстояний: результат по индексам
+			// детерминирован независимо от числа потоков.
+			if (n >= 256)
 			{
-				for (int i = range.Item1; i < range.Item2; i++)
+				var opts = new ParallelOptions { MaxDegreeOfParallelism = Environment.ProcessorCount };
+				const int chunkSize = 16;
+				Parallel.ForEach(Partitioner.Create(0, n, chunkSize), opts, range =>
+				{
+					for (int i = range.Item1; i < range.Item2; i++)
+						dists[i] = dist(vp, items[idxs[i]]);
+				});
+			}
+			else
+			{
+				for (int i = 0; i < n; i++)
 					dists[i] = dist(vp, items[idxs[i]]);
-			});
+			}
 
 			// median via quickselect (average O(n))
 			double mu = QuickSelectMedian(dists);
@@ -234,15 +138,10 @@ namespace VPTree
 
 			node.Threshold = mu;
 
-			// -----------------------------
-			// IMPORTANT FIX (balance):
-			// -----------------------------
-			// Previous code used:
-			//    if (dists[i] <= mu) left else right
-			// With a quantized distance (many ties), "mu" is often the most frequent value,
-			// and "<= mu" sends almost all points to LEFT, making RIGHT empty -> depth ~O(n).
-			//
-			// New code keeps threshold=mu but SPLITS the "== mu" bucket to keep ~n/2 on each side.
+			// Балансировка при квантованной метрике (много равных расстояний):
+			// порог = медиана, но элементы с d == mu делятся между поддеревьями так,
+			// чтобы слева оказалось ~n/2. Инварианты для поиска сохраняются:
+			// слева d(vp,x) <= mu, справа d(vp,x) >= mu.
 			var left = new List<int>(n / 2 + 1);
 			var right = new List<int>(n / 2 + 1);
 			List<int> eq = null;
@@ -264,12 +163,10 @@ namespace VPTree
 				if (need < 0) need = 0;
 				if (need > eq.Count) need = eq.Count;
 
-				// First 'need' ==mu go to left, rest to right
 				for (int i = 0; i < need; i++) left.Add(eq[i]);
 				for (int i = need; i < eq.Count; i++) right.Add(eq[i]);
 			}
 
-			// Pараллелим ТОЛЬКО первые два уровня (parallelDepth > 0).
 			if (parallelDepth > 0 && left.Count > 0 && right.Count > 0)
 			{
 				Node leftNode = null, rightNode = null;
@@ -284,7 +181,6 @@ namespace VPTree
 			}
 			else
 			{
-				// Дальше – строго последовательно
 				node.Left = left.Count > 0 ? BuildInternal(left, 0) : null;
 				node.Right = right.Count > 0 ? BuildInternal(right, 0) : null;
 			}
@@ -335,10 +231,13 @@ namespace VPTree
 			public KNNResult(int index, double dist) { Index = index; Dist = dist; }
 		}
 
+		/// <summary>
+		/// k ближайших к query элементов в порядке возрастания (distance, index).
+		/// При метричной distance результат совпадает с полным перебором, упорядоченным тем же ключом.
+		/// </summary>
 		public List<KNNResult> KNearest(T query, int k)
 		{
 			if (k <= 0) throw new ArgumentOutOfRangeException(nameof(k));
-			PrepareQueryIfNeeded(query);
 			var heap = new MaxHeap(initialCapacity: k);
 			double tau = double.PositiveInfinity;
 
@@ -354,11 +253,38 @@ namespace VPTree
 			return new List<KNNResult>(arr);
 		}
 
+		/// <summary>
+		/// Полный перебор с тем же каноническим порядком (distance, index). Служит эталоном
+		/// для проверки точности индекса и для замеров; индекс для него не нужен.
+		/// </summary>
+		public static List<KNNResult> BruteForceKNearest(IList<T> items, Func<T, T, double> distance, T query, int k)
+		{
+			if (items == null) throw new ArgumentNullException(nameof(items));
+			if (distance == null) throw new ArgumentNullException(nameof(distance));
+			if (k <= 0) throw new ArgumentOutOfRangeException(nameof(k));
+
+			var heap = new MaxHeap(initialCapacity: k);
+			for (int i = 0; i < items.Count; i++)
+			{
+				double d = distance(query, items[i]);
+				if (heap.Count < k) heap.Push(i, d);
+				else if (MaxHeap.Less(d, i, heap.PeekDist(), heap.PeekIndex())) heap.ReplaceTop(i, d);
+			}
+
+			int n = heap.Count;
+			var arr = new KNNResult[n];
+			for (int i = n - 1; i >= 0; --i)
+			{
+				heap.Pop(out int idx, out double d);
+				arr[i] = new KNNResult(idx, d);
+			}
+			return new List<KNNResult>(arr);
+		}
+
 		private void SearchKNN(Node node, T query, int k, MaxHeap heap, ref double tau)
 		{
 			if (node == null) return;
 
-			// локальные ссылки быстрее, чем поля класса в глубокой рекурсии
 			var items = _items;
 			var distFn = _dist;
 
@@ -370,40 +296,45 @@ namespace VPTree
 				heap.Push(node.Index, dist);
 				if (heap.Count == k) tau = heap.PeekDist();
 			}
-			else if (dist < tau)
+			else if (MaxHeap.Less(dist, node.Index, heap.PeekDist(), heap.PeekIndex()))
 			{
+				// Канонический порядок (dist, index): при равной дистанции побеждает меньший индекс.
 				heap.ReplaceTop(node.Index, dist);
 				tau = heap.PeekDist();
 			}
 
 			double mu = node.Threshold;
 
-			// Выбираем «ближайшую» ветку (near) и «дальнюю» (far)
 			Node near, far;
 			if (dist < mu) { near = node.Left; far = node.Right; }
 			else { near = node.Right; far = node.Left; }
 
-			// Сначала обходим "near" — быстрее сузим tau
 			if (near != null) SearchKNN(near, query, k, heap, ref tau);
 
-			// Для "far" используем веточные условия (без Abs)
+			// Отсечение по неравенству треугольника, НЕстрогое и с запасом PruneEps:
+			// элементы на расстоянии ровно tau тоже должны быть рассмотрены (канонический
+			// порядок при ties), а запас поглощает ошибку округления при вычислении
+			// расстояния (сумма произведений double), из-за которой граница |dist - mu| = tau
+			// в плавающей арифметике может «промахнуться» на ~1e-16.
 			if (far != null)
 			{
 				if (dist < mu)
 				{
-					// Был слева от порога: условие |dist - mu| <= tau эквивалентно dist + tau >= mu
-					if (dist + tau >= mu) SearchKNN(far, query, k, heap, ref tau);
+					// слева от порога: |dist - mu| <= tau  <=>  dist + tau >= mu
+					if (dist + tau + PruneEps >= mu) SearchKNN(far, query, k, heap, ref tau);
 				}
 				else
 				{
-					// Был справа: эквивалентно dist - tau <= mu
-					if (dist - tau <= mu) SearchKNN(far, query, k, heap, ref tau);
+					// справа: dist - tau <= mu
+					if (dist - tau - PruneEps <= mu) SearchKNN(far, query, k, heap, ref tau);
 				}
 			}
 		}
 
-		// Max-heap by distance (largest on top)
-		// Max-heap by distance (largest on top)
+		/// <summary>Запас на ошибку округления при отсечении ветвей (расстояния лежат в [0,1]).</summary>
+		public const double PruneEps = 1e-9;
+
+		// Max-heap by (distance, index): наверху «худший» из текущих k.
 		private sealed class MaxHeap
 		{
 			private struct Item { public int Index; public double Dist; }
@@ -419,6 +350,16 @@ namespace VPTree
 
 			[MethodImpl(MethodImplOptions.AggressiveInlining)]
 			public double PeekDist() => _a[0].Dist;
+
+			[MethodImpl(MethodImplOptions.AggressiveInlining)]
+			public int PeekIndex() => _a[0].Index;
+
+			/// <summary>(d1, i1) &lt; (d2, i2) в каноническом порядке.</summary>
+			[MethodImpl(MethodImplOptions.AggressiveInlining)]
+			public static bool Less(double d1, int i1, double d2, int i2)
+			{
+				return d1 < d2 || (d1 == d2 && i1 < i2);
+			}
 
 			[MethodImpl(MethodImplOptions.AggressiveInlining)]
 			public void Push(int index, double dist)
@@ -477,6 +418,24 @@ namespace VPTree
 				int c = a.Dist.CompareTo(b.Dist);
 				return c != 0 ? c : a.Index.CompareTo(b.Index);
 			}
+		}
+	}
+
+	/// <summary>
+	/// Канонический порядок якорей перед построением индекса: делает результат
+	/// независимым от порядка обхода файловой системы и от среды.
+	/// </summary>
+	public static class CanonicalOrder
+	{
+		public static List<MethodAnchor> Sort(IEnumerable<MethodAnchor> anchors)
+		{
+			return (anchors ?? Enumerable.Empty<MethodAnchor>())
+				.OrderBy(a => a?.ParentNameNorm ?? "", StringComparer.Ordinal)
+				.ThenBy(a => a?.MethodNameNorm ?? "", StringComparer.Ordinal)
+				.ThenBy(a => a?.ReturnTypeNorm ?? "", StringComparer.Ordinal)
+				.ThenBy(a => a?.StartOffset ?? 0)
+				.ThenBy(a => a?.Id ?? "", StringComparer.Ordinal)
+				.ToList();
 		}
 	}
 }

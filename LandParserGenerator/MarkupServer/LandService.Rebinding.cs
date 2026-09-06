@@ -145,5 +145,139 @@ namespace MarkupServer
 		{
 			return Dist.AnchorDistance(ToLegacyMethodAnchor(a), ToLegacyMethodAnchor(b), weights);
 		}
+
+		// =================================================================
+		// Правило принятия решения при перепривязке (общее для updateAnchor,
+		// перепривязки manual-якорей при рескане и второго слоя сшивки Id).
+		//
+		//   Accepted  — d1 <= tau и (d2 - d1) / d2 >= margin: уверенная привязка;
+		//   Ambiguous — кандидат близко, но второй почти так же близко: решает пользователь;
+		//   Lost      — ближайший дальше tau: сущность не найдена.
+		//
+		// Относительный margin, а не абсолютный: одинаковое разделение кандидатов
+		// трактуется одинаково при любой абсолютной близости (аудит 2026-08, §3.8.5).
+		// Пороги калибруются по кривой risk–coverage на корпусе реальной истории
+		// (experiments/e05); до калибровки — предварительные значения.
+		// =================================================================
+
+		internal enum RebindStatus { Accepted, Ambiguous, Lost }
+
+		internal sealed class RebindDecision
+		{
+			public RebindStatus Status;
+			public int BestIndex = -1;
+			public double BestDist = double.NaN;
+			public double? SecondDist;
+			public string Reason = "";
+		}
+
+		internal sealed class RebindSettings
+		{
+			/// <summary>
+			/// Порог дистанции для уверенной привязки. Калибровка по кривой risk–coverage на tune-части
+			/// корпуса реальной истории (experiments/e05, веса e02/02): tau = 0.30, margin = 0.30 дают
+			/// покрытие 98.4 % при доле ошибочных автопривязок 0.08 % (на всём корпусе 99.4 % / 0.03 %).
+			/// </summary>
+			public double Tau = ReadEnvDouble("LAND_REBIND_TAU", 0.30);
+			/// <summary>Минимальный относительный отрыв (d2 - d1) / d2. Без него риск вырастает в 3–4 раза.</summary>
+			public double MinRelativeMargin = ReadEnvDouble("LAND_REBIND_MARGIN", 0.30);
+			/// <summary>Сколько соседей запрашивать у индекса (нужно ≥ 2 для margin).</summary>
+			public int K = 2;
+
+			public static RebindSettings Default => new RebindSettings();
+
+			internal static double ReadEnvDouble(string name, double def)
+			{
+				var s = Environment.GetEnvironmentVariable(name);
+				return !string.IsNullOrWhiteSpace(s)
+					&& double.TryParse(s, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var v)
+					? v : def;
+			}
+		}
+
+		/// <summary>Чистое правило: по двум ближайшим дистанциям выдаёт статус.</summary>
+		internal static RebindStatus DecideCore(double d1, double? d2, double tau, double minRelativeMargin, out string reason)
+		{
+			if (double.IsNaN(d1)) { reason = "no candidates"; return RebindStatus.Lost; }
+			if (d1 > tau) { reason = $"d1={d1:F4} > tau={tau:F2}"; return RebindStatus.Lost; }
+			if (d2.HasValue)
+			{
+				var rel = d2.Value <= 0.0 ? 0.0 : (d2.Value - d1) / d2.Value;
+				if (rel < minRelativeMargin)
+				{
+					reason = $"margin={rel:F3} < {minRelativeMargin:F2} (d1={d1:F4}, d2={d2.Value:F4})";
+					return RebindStatus.Ambiguous;
+				}
+			}
+			reason = $"d1={d1:F4}" + (d2.HasValue ? $", d2={d2.Value:F4}" : "");
+			return RebindStatus.Accepted;
+		}
+
+		private static RebindDecision DecideFor(IReadOnlyList<VPTree<AnchorContext>.KNNResult> cands, double tau, double minRelativeMargin)
+		{
+			var dec = new RebindDecision();
+			if (cands == null || cands.Count == 0)
+			{
+				dec.Status = RebindStatus.Lost;
+				dec.Reason = "no candidates";
+				return dec;
+			}
+			dec.BestIndex = cands[0].Index;
+			dec.BestDist = cands[0].Dist;
+			dec.SecondDist = cands.Count > 1 ? cands[1].Dist : (double?)null;
+			dec.Status = DecideCore(dec.BestDist, dec.SecondDist, tau, minRelativeMargin, out var reason);
+			dec.Reason = reason;
+			return dec;
+		}
+
+		// =================================================================
+		// Единая реализация NeighborBag (VPTreeLib.AnchorsIO) для сервера и экспериментов.
+		// Вид мешка: LAND_NEIGHBOR_BAG = rich (по умолчанию) | server | none.
+		// =================================================================
+
+		internal static NeighborBagKind NeighborBagKindSetting = ParseBagKind(Environment.GetEnvironmentVariable("LAND_NEIGHBOR_BAG"));
+
+		private static NeighborBagKind ParseBagKind(string s)
+		{
+			switch ((s ?? "").Trim().ToLowerInvariant())
+			{
+				case "server": return NeighborBagKind.ServerName;
+				case "none": return NeighborBagKind.None;
+				default: return NeighborBagKind.Rich;
+			}
+		}
+
+		/// <summary>
+		/// Строит NeighborBag для набора якорей одного языка. Группировка по (файл, родитель),
+		/// IDF — по всему набору, как в экспериментальном корпусе.
+		/// </summary>
+		private static void AssignNeighborBags(IReadOnlyList<TreeNode> anchors)
+		{
+			if (anchors == null || anchors.Count == 0)
+				return;
+
+			var stubs = new List<MethodAnchor>(anchors.Count);
+			for (var i = 0; i < anchors.Count; i++)
+			{
+				var n = anchors[i];
+				stubs.Add(new MethodAnchor
+				{
+					Id = string.IsNullOrEmpty(n.Id) ? i.ToString() : n.Id,
+					File = n.Filepath ?? "",
+					MethodNameNorm = n.MethodNameNorm ?? "",
+					ParentNameNorm = n.ParentNameNorm ?? "",
+					ReturnTypeNorm = n.ReturnTypeNorm ?? "",
+					Args = (n.Args ?? new List<Arg>()).Select(a => new MethodAnchor.Arg { TypeNorm = a.TypeNorm ?? "", NameNorm = a.NameNorm ?? "" }).ToList(),
+					OrdinalInParent = n.OrdinalInParent ?? 0,
+					StartOffset = n.StartOffset ?? 0,
+					EndOffset = n.EndOffset ?? 0,
+				});
+			}
+
+			AnchorsIO.BuildNeighborBags(stubs, NeighborBagKindSetting, window: 4, groupByFile: true);
+
+			for (var i = 0; i < anchors.Count; i++)
+				anchors[i].NeighborBag = stubs[i].NeighborBag;
+		}
 	}
 }

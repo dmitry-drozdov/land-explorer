@@ -207,12 +207,13 @@ public class StitchTests
 	}
 
 	// =========================================================================
-	// 4. Документирующий тест: при threshold=0 (MVP) переименование метода
-	// не сшивает Id. Этот тест зафиксирует ожидание, чтобы при последующем
-	// включении слоя 2 (VP-tree) мы помнили, какое поведение меняется.
+	// 4. Слой 2 (VP-дерево, tau + margin) включён по умолчанию с сентября 2026:
+	// переименованное поле getUser -> findUserById (те же аргументы, тип и
+	// родитель) сшивается и наследует старый Id. До этого порог был 0 и тест
+	// фиксировал противоположное ожидание.
 	// =========================================================================
 	[TestMethod]
-	public async Task Listing_After_Rename_Does_Not_Stitch_Id_With_Default_Threshold()
+	public async Task Listing_After_Rename_Stitches_Id_Through_Fuzzy_Layer()
 	{
 		CopyFixtureInto("basic");
 		var svc = await CreateInitializedService();
@@ -227,15 +228,41 @@ public class StitchTests
 		var newAnchor = second.FirstOrDefault(x => x.n == "findUserById");
 		Assert.IsNotNull(newAnchor, "rename fixture must have findUserById");
 
-		// При threshold=0 слой 2 не сматчит — у нового якоря должен быть свежий Id.
-		Assert.AreNotEqual(oldGetUser.id, newAnchor.id,
-			"with default thresholds the renamed anchor must NOT inherit the old Id (slated to change once layer 2 is enabled)");
+		Assert.AreEqual(oldGetUser.id, newAnchor.id,
+			"renamed anchor with unchanged signature/parent must inherit the old Id through the VP-tree layer");
 
 		// listUsers (нетронутый) должен сохранить Id.
 		var oldListUsers = first.First(x => x.n == "listUsers");
 		var newListUsers = second.First(x => x.n == "listUsers");
 		Assert.AreEqual(oldListUsers.id, newListUsers.id,
 			"untouched listUsers must keep its Id even when a sibling was renamed");
+	}
+
+	// =========================================================================
+	// 4b. Слой 2 можно отключить порогом 0 (переменная окружения) — тогда
+	// переименованный якорь получает новый Id. Проверяем, что настройка читается.
+	// =========================================================================
+	[TestMethod]
+	public async Task Listing_After_Rename_Does_Not_Stitch_When_Layer2_Disabled()
+	{
+		Environment.SetEnvironmentVariable("LAND_STITCH_TAU", "0");
+		try
+		{
+			CopyFixtureInto("basic");
+			var svc = await CreateInitializedService();
+			var first = await ListAnchorsAsync(svc);
+			var oldGetUser = first.First(x => x.n == "getUser");
+
+			CopyFixtureInto("rename");
+			var second = await ListAnchorsAsync(svc);
+			var newAnchor = second.First(x => x.n == "findUserById");
+
+			Assert.AreNotEqual(oldGetUser.id, newAnchor.id, "with tau=0 the fuzzy layer is off and the renamed anchor gets a fresh Id");
+		}
+		finally
+		{
+			Environment.SetEnvironmentVariable("LAND_STITCH_TAU", null);
+		}
 	}
 
 	// =========================================================================

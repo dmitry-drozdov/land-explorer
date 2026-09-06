@@ -1,4 +1,4 @@
-﻿using OpenTracing;
+using OpenTracing;
 using OpenTracing.Util;
 using System;
 using System.Collections.Generic;
@@ -18,12 +18,22 @@ namespace VPTree
 		private readonly VPTree<MethodAnchor> _tree;
 		private readonly Dist.Weights _w;
 
-		public Rebinder(IEnumerable<MethodAnchor> anchors, Dist.Weights weights, GlobalTracer tracer = null)
+		/// <summary>
+		/// Строит индекс по якорям. Список используется как есть (в том порядке, в котором подан);
+		/// для воспроизводимого результата подавайте CanonicalOrder.Sort(anchors).
+		/// Если у якорей нет NeighborBag и buildNeighborBags = true, мешки соседей строятся
+		/// явно через AnchorsIO.BuildNeighborBags (раньше это делалось скрыто внутри VPTree).
+		/// </summary>
+		public Rebinder(IEnumerable<MethodAnchor> anchors, Dist.Weights weights, GlobalTracer tracer = null, bool buildNeighborBags = false, int neighborWindow = 4)
 		{
 			_anchors = (anchors ?? new List<MethodAnchor>()).ToList();
 			_w = weights ?? new Dist.Weights();
+			if (buildNeighborBags)
+				AnchorsIO.BuildNeighborBags(_anchors, neighborWindow);
 			_tree = new VPTree<MethodAnchor>(_anchors, (a, b) => Dist.AnchorDistance(a, b, _w), 42, tracer);
 		}
+
+		public IReadOnlyList<MethodAnchor> Anchors => _anchors;
 
 		public List<VPTree<MethodAnchor>.KNNResult> Query(MethodAnchor query, int k)
 		{
