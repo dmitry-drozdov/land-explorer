@@ -120,10 +120,41 @@ namespace MarkupServer
 		{
 			if (n == null || text == null || n.Location == null)
 				return "";
-			var start = Math.Max(0, n.Location.Start.Offset);
-			var endInclusive = Math.Min(text.Length - 1, n.Location.End.Offset);
-			if (endInclusive < start) return "";
-			return text.Substring(start, endInclusive - start + 1);
+			// Смещения LanD — в кодовых точках Unicode (ANTLR CodePointCharStream), а строка C# индексируется в UTF-16.
+			// После символов вне BMP (эмодзи в описаниях схемы) индексы расходятся, и срез сдвигается: пересчитываем
+			// кодовые точки в индексы UTF-16 по таблице начал кодовых точек (для текста без таких символов таблица тождественна).
+			var starts = CodePointStarts(text);
+			var start = CpToUtf16(starts, Math.Max(0, n.Location.Start.Offset));
+			var endExclusive = Math.Min(text.Length, CpToUtf16(starts, n.Location.End.Offset + 1));
+			if (endExclusive <= start) return "";
+			return text.Substring(start, endExclusive - start);
+		}
+
+		private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<string, int[]> CodePointStartsCache =
+			new System.Runtime.CompilerServices.ConditionalWeakTable<string, int[]>();
+
+		/// <summary>Индекс UTF-16 начала каждой кодовой точки текста; последний элемент — text.Length.</summary>
+		private static int[] CodePointStarts(string text)
+		{
+			return CodePointStartsCache.GetValue(text, t =>
+			{
+				var list = new List<int>(t.Length + 1);
+				for (int i = 0; i < t.Length; i++)
+				{
+					list.Add(i);
+					if (char.IsHighSurrogate(t[i]) && i + 1 < t.Length && char.IsLowSurrogate(t[i + 1]))
+						i++;
+				}
+				list.Add(t.Length);
+				return list.ToArray();
+			});
+		}
+
+		private static int CpToUtf16(int[] starts, int codePoint)
+		{
+			if (codePoint <= 0) return 0;
+			if (codePoint >= starts.Length) return starts[starts.Length - 1];
+			return starts[codePoint];
 		}
 
 		private static List<Node> GetGqlTypeDefs(Node root)

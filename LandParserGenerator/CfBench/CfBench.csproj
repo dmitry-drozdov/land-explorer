@@ -1,0 +1,51 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- CfBench: прогон ОРИГИНАЛЬНОГО ContextFinder Головешкина (Land.Markup, .NET Framework) по парам версий
+       GraphQL-схем корпуса markup/experiments/e03_real_history_corpus. Используется собранная Land.Markup.dll
+       (Land.Markup/bin/Debug) и Land.Core.dll из components/LanD/Core. См. markup/experiments/e11_cf_original. -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <PlatformTarget>x64</PlatformTarget>
+    <AssemblyName>CfBench</AssemblyName>
+    <RootNamespace>CfBench</RootNamespace>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <GenerateBindingRedirectsOutputType>true</GenerateBindingRedirectsOutputType>
+    <ServerGarbageCollection>false</ServerGarbageCollection>
+    <TieredPGO>true</TieredPGO>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.ValueTuple" Version="4.5.0" />
+    <PackageReference Include="System.Memory" Version="4.5.5" />
+    <PackageReference Include="System.Runtime.CompilerServices.Unsafe" Version="6.0.0" />
+    <PackageReference Include="System.Buffers" Version="4.5.1" />
+    <PackageReference Include="System.Numerics.Vectors" Version="4.5.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="Land.Markup">
+      <HintPath>..\Land.Markup\bin\CfBench\Land.Markup.dll</HintPath>
+    </Reference>
+    <Reference Include="Land.Core">
+      <HintPath>..\components\LanD\Core\Land.Core.dll</HintPath>
+    </Reference>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>..\Land.Markup\bin\CfBench\Newtonsoft.Json.dll</HintPath>
+    </Reference>
+    <Reference Include="OpenTracing">
+      <HintPath>..\Land.Markup\bin\CfBench\OpenTracing.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- все зависимости Land.Markup рядом с exe -->
+    <None Include="..\Land.Markup\bin\CfBench\*.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+    <None Include="..\Land.Markup\bin\CfBench\*.config" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+  </ItemGroup>
+
+</Project>

@@ -36,6 +36,7 @@ static class Program
 				case "knn-batch": return KnnBatch(args);
 				case "pairs": return Pairs(args);
 				case "determinism": return Determinism(args);
+				case "build-cost": return BuildCost(args);
 				default: Usage(); return 2;
 			}
 		}
@@ -46,6 +47,47 @@ static class Program
 		}
 	}
 
+	// build-cost: стоимость подготовки на одно изменение файла — мешки соседей + построение VP-дерева
+	// по индексу (новой версии) для каждой пары манифеста knn-batch; медиана по повторам.
+	// Время дерева измеряется без счётчика вызовов (Interlocked в параллельном построении искажает время);
+	// число вычислений расстояния и глубина — отдельным построением со счётчиком.
+	// Параллелизм построения = Environment.ProcessorCount (переопределяется DOTNET_PROCESSOR_COUNT).
+	static int BuildCost(Dictionary<string, string> a)
+	{
+		var manifest = JArray.Parse(File.ReadAllText(Get(a, "manifest") ?? throw new ArgumentException("--manifest")));
+		var w = MakeWeights(a);
+		var bags = BagKind(a);
+		int repeats = GetInt(a, "repeats", 7);
+		var outPath = Get(a, "out") ?? throw new ArgumentException("--out");
+		Func<MethodAnchor, MethodAnchor, double> plain = (x, y) => Dist.AnchorDistance(x, y, w);
+		var rows = new List<string>();
+		var sw = new Stopwatch();
+		bool warmed = false;
+		foreach (var job in manifest.OfType<JObject>())
+		{
+			string label = job["label"]?.ToString() ?? "";
+			var index = CanonicalOrder.Sort(LoadAnchors(job["index"]!.ToString()));
+			if (index.Count == 0) continue;
+			if (!warmed)
+			{
+				for (int i = 0; i < 5; i++) { AnchorsIO.BuildNeighborBags(index, bags, 4); _ = new VPTree<MethodAnchor>(index, plain, 42); }
+				warmed = true;
+			}
+			var bagsMs = new List<double>(); var treeMs = new List<double>();
+			for (int r = 0; r < repeats; r++)
+			{
+				sw.Restart(); AnchorsIO.BuildNeighborBags(index, bags, 4); sw.Stop(); bagsMs.Add(sw.Elapsed.TotalMilliseconds);
+				sw.Restart(); _ = new VPTree<MethodAnchor>(index, plain, 42); sw.Stop(); treeMs.Add(sw.Elapsed.TotalMilliseconds);
+			}
+			var c = new Counter();
+			var counted = new VPTree<MethodAnchor>(index, Counted(w, c), 42);
+			rows.Add(Csv(label, index.Count, repeats, Median(bagsMs), Median(treeMs), c.Value, counted.BuildDepth, bagsMs.Min(), treeMs.Min(), Environment.ProcessorCount));
+		}
+		AppendCsv(outPath, "label,n_index,repeats,bags_ms,tree_ms,tree_calls,tree_depth,bags_ms_min,tree_ms_min,processor_count", rows);
+		Console.Error.WriteLine($"[build-cost] {rows.Count} jobs, repeats={repeats}, processors={Environment.ProcessorCount}");
+		return 0;
+	}
+
 	static void Usage()
 	{
 		Console.Error.WriteLine(@"usage:
@@ -54,7 +96,9 @@ static class Program
                   [--k 1,5,20] [--mode constant|legacy] [--weights 0.15,0.30,0.35,0.15,0.05] [--argmax 8]
                   [--bags rich|server|none] [--queries 500] [--seed 42] [--out summary.csv] [--per-query pq.csv] [--label text]
   VPTreeBench pairs --anchors a.json --pairs pairs.csv [--mode ...] [--bags ...] [--weights ...] --out dist.csv
-  VPTreeBench determinism --anchors a.json [--repeats 20] [--queries 200] [--out res.csv]");
+  VPTreeBench determinism --anchors a.json [--repeats 20] [--queries 200] [--out res.csv]
+  VPTreeBench build-cost --manifest jobs.json [--repeats 7] [--mode ...] [--bags ...] [--weights ...] --out cost.csv
+  knn-batch also accepts --window N (neighbor bag window, default 4)");
 	}
 
 	// ----------------------------------------------------------------- helpers
@@ -356,8 +400,9 @@ static class Program
 			if (!string.IsNullOrEmpty(gtPath))
 				gt = JObject.Parse(File.ReadAllText(gtPath)).Properties().ToDictionary(p => p.Name, p => p.Value.Type == JTokenType.Null ? null : p.Value.ToString());
 			if (index.Count == 0 || queries.Count == 0) { done++; continue; }
-			AnchorsIO.BuildNeighborBags(index, bags, 4);
-			AnchorsIO.BuildNeighborBags(queries, bags, 4);
+			int window = GetInt(a, "window", 4);   // окно мешка соседей (±window внутри группы файл+родитель)
+			AnchorsIO.BuildNeighborBags(index, bags, window);
+			AnchorsIO.BuildNeighborBags(queries, bags, window);
 			var qc = new Counter(); var distQ = Counted(w, qc);
 			sw.Restart(); var tree = new VPTree<MethodAnchor>(index, distQ, 42); sw.Stop();
 			double buildMs = sw.Elapsed.TotalMilliseconds; long buildCalls = qc.Value;
