@@ -9,7 +9,7 @@ namespace MarkupServer
 {
 	public partial class LandService
 	{
-		private void BuildCurrentRebindingForestsFromDisk()
+		internal void BuildCurrentRebindingForestsFromDisk()
 		{
 			if (string.IsNullOrWhiteSpace(currentFolderPath))
 				throw new InvalidOperationException("currentFolderPath is empty. Call land/listAnchors first.");

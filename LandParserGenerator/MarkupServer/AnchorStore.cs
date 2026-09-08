@@ -1,9 +1,11 @@
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using Newtonsoft.Json.Serialization;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Text;
 
 namespace MarkupServer
@@ -11,11 +13,27 @@ namespace MarkupServer
 	/// <summary>
 	/// Персистентное хранение semantic snapshot разметки.
 	/// Храним anchors + relations + materialized Roots для быстрого старта.
-	/// VP-дерево не сохраняем.
+	/// Версия 10 («вариант C», markup/experiments/e13_storage_size §2б): мешки соседей (TreeNode.NeighborBag)
+	/// в файл не пишутся — они детерминированно строятся по якорям при загрузке
+	/// (LandService.RebuildNeighborBagsForPersistedAnchors); снимок VP-дерева живёт отдельным кэшем
+	/// (.land/vp_index.json, TreeCacheStore). Файлы версии 9 читаются как есть, их мешки тоже перестраиваются.
 	/// </summary>
 	internal static class AnchorStore
 	{
-		public const int CurrentVersion = 9;
+		public const int CurrentVersion = 10;
+		private const int VersionWithBagsOnDisk = 9;   // тот же формат, но с NeighborBag в файле
+
+		/// <summary>При записи пропускает TreeNode.NeighborBag (мешки живут только в памяти).</summary>
+		private sealed class SkipNeighborBagResolver : DefaultContractResolver
+		{
+			protected override JsonProperty CreateProperty(MemberInfo member, MemberSerialization memberSerialization)
+			{
+				var prop = base.CreateProperty(member, memberSerialization);
+				if (member.DeclaringType == typeof(TreeNode) && member.Name == nameof(TreeNode.NeighborBag))
+					prop.ShouldSerialize = _ => false;
+				return prop;
+			}
+		}
 		private const string FolderName = ".land";
 		private const string FileName = "anchors.json";
 
@@ -45,7 +63,7 @@ namespace MarkupServer
 				var jo = JObject.Parse(json);
 				var version = jo.Value<int?>(nameof(PersistedMarkup.Version)) ?? 0;
 
-				if (version == CurrentVersion)
+				if (version == CurrentVersion || version == VersionWithBagsOnDisk)
 				{
 					var parsed = jo.ToObject<PersistedMarkup>();
 					if (parsed == null)
@@ -65,6 +83,7 @@ namespace MarkupServer
 					parsed.Links ??= new List<AnchorLink>();
 					parsed.LostAnchors ??= new List<LostAnchor>();
 					data = parsed;
+					RebuildNeighborBags(data, ref error);
 					return true;
 				}
 
@@ -96,6 +115,7 @@ namespace MarkupServer
 						Links = legacy.Links ?? new List<AnchorLink>(),
 						LostAnchors = legacy.LostAnchors ?? new List<LostAnchor>(),
 					};
+					RebuildNeighborBags(data, ref error);
 					return true;
 				}
 
@@ -107,6 +127,22 @@ namespace MarkupServer
 				error = ex.Message;
 				data = null;
 				return false;
+			}
+		}
+
+		/// <summary>
+		/// Мешки соседей не хранятся: строим их по загруженным якорям теми же группами, что при извлечении.
+		/// Ошибка построения не отменяет загрузку — якоря остаются без мешков, текст ошибки уходит в error.
+		/// </summary>
+		private static void RebuildNeighborBags(PersistedMarkup data, ref string error)
+		{
+			try
+			{
+				LandService.RebuildNeighborBagsForPersistedAnchors(data?.Anchors);
+			}
+			catch (Exception ex)
+			{
+				error = "neighbor bags were not rebuilt: " + ex.Message;
 			}
 		}
 
@@ -151,7 +187,8 @@ namespace MarkupServer
 						Formatting.Indented,
 						new JsonSerializerSettings
 						{
-							NullValueHandling = NullValueHandling.Ignore
+							NullValueHandling = NullValueHandling.Ignore,
+							ContractResolver = new SkipNeighborBagResolver(),   // версия 10: без мешков соседей
 						});
 				}
 				finally

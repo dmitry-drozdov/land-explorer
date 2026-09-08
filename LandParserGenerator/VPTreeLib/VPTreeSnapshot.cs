@@ -33,6 +33,7 @@ namespace VPTree
 			_dist = distance ?? throw new ArgumentNullException("distance");
 			_rng = new Random(seed ?? 42);
 			_root = root;
+			BuildDepth = ComputeDepth(root);
 		}
 
 		/// <summary>

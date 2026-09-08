@@ -558,16 +558,25 @@ namespace MarkupServer
 			return GetTreeNodeFromTsNode(best.Node, filePath, best.ParentName);
 		}
 
-		private void LoadRebindingForestsFromAnchors(IEnumerable<TreeNode> anchors)
+		/// <summary>
+		/// Леса перепривязки по профилям. Дерево профиля берётся из кэша снимков (.land/vp_index.json,
+		/// см. LandService.TreeCache.cs), если хэш входа совпал; иначе строится и кладётся в кэш.
+		/// </summary>
+		internal void LoadRebindingForestsFromAnchors(IEnumerable<TreeNode> anchors)
 		{
 			currentContextsByProfileKey.Clear();
 			currentNodesByProfileKey.Clear();
 			currentTreesByProfileKey.Clear();
+			lastForestSource.Clear();
 
 			var allAnchors = (anchors ?? Enumerable.Empty<TreeNode>())
 				.Where(CanParticipateInRebinding)
 				.Select(CloneAnchor)
 				.ToList();
+
+			var cacheEnabled = TreeCacheStore.Enabled && !string.IsNullOrWhiteSpace(currentFolderPath);
+			var cache = cacheEnabled ? (TreeCacheStore.TryLoad(currentFolderPath) ?? new PersistedTreeCache()) : null;
+			var cacheDirty = false;
 
 			foreach (var grp in allAnchors.GroupBy(GetProfileKey, StringComparer.OrdinalIgnoreCase))
 			{
@@ -579,15 +588,42 @@ namespace MarkupServer
 					continue;
 
 				var weights = GetWeightsForProfileKey(grp.Key);
-				var tree = new VPTree<AnchorContext>(
-					contexts,
-					(a, b) => AnchorContextDistance(a, b, weights),
-					42,
-					Tracing.Tracer);
+				Func<AnchorContext, AnchorContext, double> distance = (a, b) => AnchorContextDistance(a, b, weights);
+
+				VPTree<AnchorContext> tree = null;
+				var hash = cacheEnabled ? TreeCacheHash(contexts, weights) : null;
+				if (cacheEnabled && cache.Profiles.TryGetValue(grp.Key, out var cached) && cached != null
+					&& string.Equals(cached.Hash, hash, StringComparison.Ordinal))
+				{
+					tree = TryRestoreTreeFromCache(cached, contexts, distance, grp.Key);
+				}
+
+				var source = "cache";
+				if (tree == null)
+				{
+					source = "built";
+					tree = new VPTree<AnchorContext>(contexts, distance, 42, Tracing.Tracer);
+					if (cacheEnabled)
+					{
+						try
+						{
+							cache.Profiles[grp.Key] = MakeProfileTreeEntry(tree, contexts, hash, weights);
+							cacheDirty = true;
+						}
+						catch (Exception ex)
+						{
+							Debug($"[vptree] cache snapshot failed for profile={grp.Key}: {ex.Message}");
+						}
+					}
+				}
 
 				currentTreesByProfileKey[grp.Key] = tree;
-				Debug($"[vptree] built profile={grp.Key}, size={contexts.Count}, depth={tree.BuildDepth}");
+				lastForestSource[grp.Key] = source;
+				Debug($"[vptree] {source} profile={grp.Key}, size={contexts.Count}, depth={tree.BuildDepth}");
 			}
+
+			if (cacheDirty && !TreeCacheStore.TrySave(currentFolderPath, cache, out var cacheErr))
+				Debug($"[vptree] cache save failed: {cacheErr}");
 		}
 
 		private TreeNode RebindAnchorAgainstCurrentForests(TreeNode oldNode)

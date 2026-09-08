@@ -248,6 +248,34 @@ namespace MarkupServer
 		}
 
 		/// <summary>
+		/// Мешки соседей в .land/anchors.json не хранятся (AnchorStore, версия 10): после загрузки строим их заново
+		/// по тем же группам, что при извлечении (BuildSemanticMarkupFromDisk): GraphQL — только поля (gqlField),
+		/// TypeScript — все якоря языка; у остальных (объявления типов) мешка нет. Результат детерминирован:
+		/// группировка по (файл, родитель), порядок по OrdinalInParent, IDF по всему набору языка.
+		/// </summary>
+		internal static void RebuildNeighborBagsForPersistedAnchors(IEnumerable<TreeNode> anchors)
+		{
+			var list = (anchors ?? Enumerable.Empty<TreeNode>())
+				.Where(x => x != null && string.Equals(x.NodeType, "anchor", StringComparison.OrdinalIgnoreCase))
+				.ToList();
+			foreach (var a in list)
+				a.NeighborBag = null;
+
+			var gqlFields = list
+				.Where(x => string.Equals(x.Language, LangGql, StringComparison.OrdinalIgnoreCase)
+					&& string.Equals(x.AnchorKind, AnchorKindGqlField, StringComparison.OrdinalIgnoreCase))
+				.ToList();
+			if (gqlFields.Count > 0)
+				AssignNeighborBags(gqlFields);
+
+			var tsAnchors = list
+				.Where(x => string.Equals(x.Language, LangTs, StringComparison.OrdinalIgnoreCase))
+				.ToList();
+			if (tsAnchors.Count > 0)
+				AssignNeighborBags(tsAnchors);
+		}
+
+		/// <summary>
 		/// Строит NeighborBag для набора якорей одного языка. Группировка по (файл, родитель),
 		/// IDF — по всему набору, как в экспериментальном корпусе.
 		/// </summary>

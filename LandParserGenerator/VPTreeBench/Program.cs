@@ -37,6 +37,7 @@ static class Program
 				case "pairs": return Pairs(args);
 				case "determinism": return Determinism(args);
 				case "build-cost": return BuildCost(args);
+				case "save-index": return SaveIndex(args);
 				default: Usage(); return 2;
 			}
 		}
@@ -88,6 +89,108 @@ static class Program
 		return 0;
 	}
 
+	// save-index: сохранение индекса штатными средствами библиотеки — якоря с мешками соседей (AnchorsIO.SaveJson)
+	// и снимок VP-дерева (VpTreeStorage.SaveJson, как Rebinder.ShapShot); затем восстановление из обоих файлов
+	// (AnchorsIO.LoadJson + VPTree.FromSnapshot) и сверка k-NN восстановленного дерева с построенным на выборке запросов.
+	// Для сравнения объёма хранения с файлом разметки панели (CfBench --save-markup), markup/experiments/e13_storage_size.
+	static int SaveIndex(Dictionary<string, string> a)
+	{
+		var anchors = CanonicalOrder.Sort(LoadAnchors(Get(a, "anchors") ?? throw new ArgumentException("--anchors")));
+		var parents = Get(a, "parents");
+		if (!string.IsNullOrEmpty(parents))
+		{
+			var set = new HashSet<string>(parents.Split(',').Select(x => MethodAnchor.NormalizeName(x.Trim())), StringComparer.Ordinal);
+			anchors = anchors.Where(x => set.Contains(x.ParentNameNorm ?? "")).ToList();
+		}
+		if (anchors.Count == 0) throw new InvalidOperationException("no anchors");
+		var w = MakeWeights(a);
+		var bags = BagKind(a);
+		int window = GetInt(a, "window", 4);
+		string label = Get(a, "label", "");
+		string outDir = Get(a, "out-dir") ?? throw new ArgumentException("--out-dir");
+		Directory.CreateDirectory(outDir);
+		Func<MethodAnchor, MethodAnchor, double> dist = (x, y) => Dist.AnchorDistance(x, y, w);
+
+		int repeats = Math.Max(1, GetInt(a, "repeats", 1));
+		var bagsMsList = new List<double>(); var treeMsList = new List<double>();
+		var saveAnchorsMsList = new List<double>(); var saveTreeMsList = new List<double>(); var loadMsList = new List<double>();
+		var anchorsPath = Path.Combine(outDir, "anchors.json");
+		var treePath = Path.Combine(outDir, "vp_index.json");
+		var sw = new Stopwatch();
+		VPTree<MethodAnchor> tree = null;
+		VpTreeSnapshot snap = null;
+		for (int rep = 0; rep < repeats; rep++)
+		{
+			sw.Restart();
+			AnchorsIO.BuildNeighborBags(anchors, bags, window);
+			bagsMsList.Add(sw.Elapsed.TotalMilliseconds);
+			sw.Restart();
+			tree = new VPTree<MethodAnchor>(anchors, dist, 42);
+			treeMsList.Add(sw.Elapsed.TotalMilliseconds);
+			sw.Restart();
+			AnchorsIO.SaveJson(anchorsPath, anchors);
+			saveAnchorsMsList.Add(sw.Elapsed.TotalMilliseconds);
+			snap = tree.ToSnapshot(x => x.Id, $"weights={w.NameW},{w.ArgsW},{w.ReturnsW},{w.ParentW},{w.NeighW};bags={bags};window={window};seed=42");
+			sw.Restart();
+			VpTreeStorage.SaveJson(treePath, snap);
+			saveTreeMsList.Add(sw.Elapsed.TotalMilliseconds);
+			if (rep + 1 < repeats)
+			{
+				sw.Restart();
+				var l = AnchorsIO.LoadJson(anchorsPath);
+				var sl = VpTreeStorage.LoadJson(treePath);
+				var ix = new Dictionary<string, int>(l.Count, StringComparer.Ordinal);
+				for (int i = 0; i < l.Count; i++) ix[l[i].Id] = i;
+				_ = VPTree<MethodAnchor>.FromSnapshot(sl, l, id => ix.TryGetValue(id, out var i) ? i : -1, dist);
+				loadMsList.Add(sw.Elapsed.TotalMilliseconds);
+			}
+		}
+		double bagsMs = Median(bagsMsList), treeMs = Median(treeMsList), saveAnchorsMs = Median(saveAnchorsMsList), saveTreeMs = Median(saveTreeMsList);
+
+		// --also-nobags: тот же список якорей без мешков соседей (вариант C хранения: мешки строятся при загрузке)
+		long nobagsBytes = -1;
+		if (a.ContainsKey("also-nobags"))
+		{
+			var stripped = anchors.Select(x => new MethodAnchor
+			{
+				Id = x.Id, StartOffset = x.StartOffset, EndOffset = x.EndOffset, MethodNameNorm = x.MethodNameNorm,
+				ParentNameNorm = x.ParentNameNorm, ReturnTypeNorm = x.ReturnTypeNorm, Args = x.Args, OrdinalInParent = x.OrdinalInParent,
+				File = x.File, NeighborBag = null,
+			}).ToList();
+			var nobagsPath = Path.Combine(outDir, "anchors_nobags.json");
+			AnchorsIO.SaveJson(nobagsPath, stripped);
+			nobagsBytes = new FileInfo(nobagsPath).Length;
+		}
+
+		// восстановление: якоря (мешки уже в файле) + дерево из снимка
+		sw.Restart();
+		var loaded = AnchorsIO.LoadJson(anchorsPath);
+		var snapLoaded = VpTreeStorage.LoadJson(treePath);
+		var idx = new Dictionary<string, int>(loaded.Count, StringComparer.Ordinal);
+		for (int i = 0; i < loaded.Count; i++) idx[loaded[i].Id] = i;
+		var restored = VPTree<MethodAnchor>.FromSnapshot(snapLoaded, loaded, id => idx.TryGetValue(id, out var i) ? i : -1, dist);
+		loadMsList.Add(sw.Elapsed.TotalMilliseconds);
+		double loadMs = Median(loadMsList);
+
+		int nq = Math.Min(GetInt(a, "verify", 200), anchors.Count);
+		var rng = new Random(42);
+		var order = Enumerable.Range(0, anchors.Count).OrderBy(_ => rng.Next()).Take(nq).ToList();
+		int mismatch = 0;
+		foreach (int qi in order)
+		{
+			var r1 = tree.KNearest(anchors[qi], 2);
+			var r2 = restored.KNearest(loaded[qi], 2);
+			bool same = r1.Count == r2.Count;
+			for (int j = 0; same && j < r1.Count; j++)
+				same = anchors[r1[j].Index].Id == loaded[r2[j].Index].Id && r1[j].Dist == r2[j].Dist;
+			if (!same) mismatch++;
+		}
+		AppendCsv(Get(a, "out"), "label,n,bags_ms,tree_ms,anchors_bytes,tree_bytes,save_anchors_ms,save_tree_ms,load_ms,tree_nodes,verify_queries,verify_mismatch,anchors_nobags_bytes,repeats",
+			new[] { Csv(label, anchors.Count, bagsMs, treeMs, new FileInfo(anchorsPath).Length, new FileInfo(treePath).Length, saveAnchorsMs, saveTreeMs, loadMs, snap.Nodes.Count, nq, mismatch, nobagsBytes, repeats) });
+		Console.Error.WriteLine($"[save-index] {label}: n={anchors.Count} anchors={new FileInfo(anchorsPath).Length} bytes, tree={new FileInfo(treePath).Length} bytes, restore {loadMs:F0} ms, mismatches {mismatch}/{nq}");
+		return mismatch == 0 ? 0 : 1;
+	}
+
 	static void Usage()
 	{
 		Console.Error.WriteLine(@"usage:
@@ -98,6 +201,7 @@ static class Program
   VPTreeBench pairs --anchors a.json --pairs pairs.csv [--mode ...] [--bags ...] [--weights ...] --out dist.csv
   VPTreeBench determinism --anchors a.json [--repeats 20] [--queries 200] [--out res.csv]
   VPTreeBench build-cost --manifest jobs.json [--repeats 7] [--mode ...] [--bags ...] [--weights ...] --out cost.csv
+  VPTreeBench save-index --anchors a.json --out-dir DIR [--label text] [--parents Query,Mutation] [--bags ...] [--weights ...] [--window 4] [--verify 200] [--also-nobags] [--repeats 1] --out sizes.csv
   knn-batch also accepts --window N (neighbor bag window, default 4)");
 	}
 

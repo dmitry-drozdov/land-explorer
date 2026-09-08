@@ -13,8 +13,10 @@
 // Соответствие Id — через anchors/*.json корпуса: (файл, StartOffset узла) → Id.
 //
 // usage: CfBench --grammar graphql.land --jobs jobs.json --out pairs.csv --per-query pq.csv [--single-core | --core N] [--no-heuristic] [--only label]
+//        [--save-markup DIR --markup-csv markup.csv [--markup-only] [--markup-parents Query,Mutation]]  (объём хранения, e13)
 // =====================================================================================
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -37,6 +39,15 @@ namespace CfBench
 	{
 		static readonly HashSet<string> FieldTypes = new HashSet<string> { "type_line", "func_line" };
 		static bool NoHeuristic;
+		// --save-markup DIR: после создания точек сохранить файл разметки панели (MarkupManager.Serialize, как команда
+		// «сохранить» в Land.Control) — для сравнения объёма хранения с индексом VP-дерева (markup/experiments/e13_storage_size);
+		// --markup-only: без перепривязки (new_dir/new_anchors в job не нужны); --markup-csv path: сводка по файлам разметки;
+		// --markup-parents Query,Mutation: вместо AddLand точки создаются только для полей перечисленных типов (AddConcernPoint,
+		// как ручная разметка выбранных типов в панели)
+		static string SaveMarkupDir;
+		static bool MarkupOnly;
+		static HashSet<string> MarkupParents;
+		static readonly List<string> MarkupRows = new List<string>();
 
 		static int Main(string[] argv)
 		{
@@ -55,6 +66,11 @@ namespace CfBench
 			else if (a.ContainsKey("single-core"))
 				Process.GetCurrentProcess().ProcessorAffinity = (IntPtr)1;
 			NoHeuristic = a.ContainsKey("no-heuristic");
+			SaveMarkupDir = a.ContainsKey("save-markup") ? Path.GetFullPath(a["save-markup"]) : null;
+			MarkupOnly = a.ContainsKey("markup-only");
+			MarkupParents = a.ContainsKey("markup-parents")
+				? new HashSet<string>(a["markup-parents"].Split(',').Select(x => x.Trim()).Where(x => x.Length > 0), StringComparer.Ordinal)
+				: null;
 
 			var messages = new List<Message>();
 			var parser = Builder.BuildParser(GrammarType.LR, File.ReadAllText(a["grammar"]), messages);
@@ -97,6 +113,8 @@ namespace CfBench
 			WriteCsv(a["out"], "label,n_old_files,n_new_files,n_points,n_points_with_id,n_auto_local,n_auto_total,ms_parse_old,ms_parse_new,ms_addland,ms_local,ms_global,ms_total,note", pairRows);
 			if (a.ContainsKey("per-query"))
 				WriteCsv(a["per-query"], "label,old_id,point_type,search,top1_id,top1_file,top1_offset,sim1,sim2,is_auto,n_candidates", pqRows);
+			if (a.ContainsKey("markup-csv"))
+				WriteCsv(a["markup-csv"], "label,n_points_all,n_points_anchored,n_contexts_all,n_contexts_fields,bytes_all,bytes_fields,ms_addland,ms_serialize_all,ms_serialize_fields,path_all,path_fields", MarkupRows);
 			Console.Error.WriteLine($"[cfbench] done={done} failed={failed} in {swAll.Elapsed.TotalSeconds:F0}s");
 			return failed == 0 ? 0 : 1;
 		}
@@ -105,15 +123,15 @@ namespace CfBench
 		{
 			var label = job["label"].ToString();
 			var oldDir = Path.GetFullPath(job["old_dir"].ToString());
-			var newDir = Path.GetFullPath(job["new_dir"].ToString());
+			var newDir = MarkupOnly ? null : Path.GetFullPath(job["new_dir"].ToString());
 			var oldIds = LoadAnchorIds(job["old_anchors"].ToString());
-			var newIds = LoadAnchorIds(job["new_anchors"].ToString());
+			var newIds = MarkupOnly ? new Dictionary<(string, int), string>() : LoadAnchorIds(job["new_anchors"].ToString());
 
 			var sw = Stopwatch.StartNew();
 			var oldFiles = ParseDir(parser, oldDir);
 			double msParseOld = sw.Elapsed.TotalMilliseconds;
 			sw.Restart();
-			var newFiles = ParseDir(parser, newDir);
+			var newFiles = MarkupOnly ? new List<ParsedFile>() : ParseDir(parser, newDir);
 			double msParseNew = sw.Elapsed.TotalMilliseconds;
 
 			// имена файлов — относительные пути, одинаковые для старой и новой версии (файл «изменился на месте»,
@@ -126,10 +144,22 @@ namespace CfBench
 
 			sw.Restart();
 			foreach (var f in oldFiles)
-				mm.AddLand(f);
+			{
+				if (MarkupParents != null) AddFieldsOfParents(mm, f);
+				else mm.AddLand(f);
+			}
 			double msAddLand = sw.Elapsed.TotalMilliseconds;
 
 			var allPoints = mm.GetConcernPoints();
+			if (SaveMarkupDir != null)
+				SaveMarkup(mm, label, oldIds, msAddLand);
+			if (MarkupOnly)
+			{
+				int nAnchored = allPoints.Count(p => oldIds.ContainsKey((p.Context.FileName, p.Context.StartOffset)));
+				pairRows.Add(Csv(label, oldFiles.Count, 0, allPoints.Count, nAnchored, 0, 0, msParseOld, 0.0, msAddLand, 0.0, 0.0, 0.0, "markup-only"));
+				Console.Error.WriteLine($"[cfbench] {label}: points={allPoints.Count} (anchored {nAnchored}) addland={msAddLand:F0}ms (markup-only)");
+				return;
+			}
 			if (Environment.GetEnvironmentVariable("CFBENCH_DEBUG") == "1")
 			{
 				Console.Error.WriteLine("  all points: " + allPoints.Count + " types: " + string.Join(",", allPoints.GroupBy(p => p.Context.Type).Select(g => g.Key + ":" + g.Count())));
@@ -195,6 +225,77 @@ namespace CfBench
 			pairRows.Add(Csv(label, oldFiles.Count, newFiles.Count, points.Count, pointId.Count, autoLocal.Count, nAutoTotal,
 				msParseOld, msParseNew, msAddLand, msLocal, msGlobal, msLocal + msGlobal, ""));
 			Console.Error.WriteLine($"[cfbench] {label}: points={points.Count} (ids {pointId.Count}) auto={nAutoTotal} addland={msAddLand:F0}ms local={msLocal:F0}ms global={msGlobal:F0}ms");
+		}
+
+		/// Точки только для полей типов из MarkupParents: для каждого поля AddConcernPoint без перепривязки
+		/// (remap: false — иначе панель перепривязывает все точки типа при каждом добавлении); кэши контекстов общие
+		/// на файл, как внутри AddLand. Аргументы полей (func_arg = type_line) точками не становятся.
+		static void AddFieldsOfParents(MarkupManager mm, ParsedFile file)
+		{
+			var visitorCache = new Dictionary<string, GroupNodesByTypeVisitor>();
+			var ancestorCache = new Dictionary<Node, SiblingsContextConstructionCache>();
+			var siblingCache = new Dictionary<Node, SiblingsContext>();
+			var cntOnlyCache = new Dictionary<Node, PointContext>();
+			var simCache = new ConcurrentDictionary<CommutativePairGuid, Similarity>();
+			var concerns = new Dictionary<string, Concern>(StringComparer.Ordinal);
+			int n = 0;
+			void Walk(Node node, string typeName)
+			{
+				if (node == null) return;
+				if (node.Type == "type_def")
+					typeName = node.Children?.FirstOrDefault(c => c.Type == "id")?.Value?.FirstOrDefault();
+				if (FieldTypes.Contains(node.Type))
+				{
+					if (typeName != null && MarkupParents.Contains(typeName))
+					{
+						if (!concerns.TryGetValue(typeName, out var concern))
+						{
+							concern = mm.AddConcern(typeName, null, null, false);
+							concerns[typeName] = concern;
+						}
+						mm.AddConcernPoint(node, null, file, null, null, concern, false, 0, ancestorCache, visitorCache, siblingCache, cntOnlyCache, simCache, false);
+						n++;
+					}
+					return;
+				}
+				if (node.Children != null)
+					foreach (var ch in node.Children) Walk(ch, typeName);
+			}
+			Walk(file.Root, null);
+			Console.Error.WriteLine($"[cfbench] {file.Name}: {n} points for parents {string.Join(",", MarkupParents)}");
+		}
+
+		/// Сохранение файла разметки панели: как есть (все созданные точки) и, без --markup-parents, второй вариант только
+		/// с точками, которым соответствует якорь VP-дерева (поля без аргументов и объявлений типов) — те же сущности,
+		/// что в индексе VP-дерева. Размер файла и число сохранённых контекстов (GetPointContexts: контексты точек,
+		/// их «похожих элементов» и ближайших соседей) — в --markup-csv.
+		static void SaveMarkup(MarkupManager mm, string label, Dictionary<(string, int), string> oldIds, double msAddLand)
+		{
+			Directory.CreateDirectory(SaveMarkupDir);
+			bool parents = MarkupParents != null;
+			var all = mm.GetConcernPoints();
+			int nCtxAll = mm.GetPointContexts().Count;
+			var pathAll = Path.Combine(SaveMarkupDir, label + (parents ? ".parents.json" : ".all.json"));
+			var sw = Stopwatch.StartNew();
+			mm.Serialize(pathAll, false);
+			double msSerAll = sw.Elapsed.TotalMilliseconds;
+			long bytesAll = new FileInfo(pathAll).Length;
+			int nAnchored = all.Count(p => oldIds.ContainsKey((p.Context.FileName, p.Context.StartOffset)));
+			string pathFields = ""; long bytesFields = -1; int nCtxFields = -1; double msSerFields = double.NaN;
+			if (!parents)
+			{
+				foreach (var p in all.Where(p => !oldIds.ContainsKey((p.Context.FileName, p.Context.StartOffset))).ToList())
+					mm.RemoveElement(p);
+				nCtxFields = mm.GetPointContexts().Count;
+				pathFields = Path.Combine(SaveMarkupDir, label + ".fields.json");
+				sw.Restart();
+				mm.Serialize(pathFields, false);
+				msSerFields = sw.Elapsed.TotalMilliseconds;
+				bytesFields = new FileInfo(pathFields).Length;
+			}
+			MarkupRows.Add(Csv(label, all.Count, nAnchored, nCtxAll, nCtxFields, bytesAll, bytesFields, msAddLand, msSerAll, msSerFields, pathAll, pathFields));
+			Console.Error.WriteLine($"[cfbench] {label}: markup saved: points={all.Count} anchored={nAnchored} contexts={nCtxAll} bytes={bytesAll}"
+				+ (parents ? "" : $" | fields only: contexts={nCtxFields} bytes={bytesFields}"));
 		}
 
 		static List<ParsedFile> ParseDir(BaseParser parser, string dir)
