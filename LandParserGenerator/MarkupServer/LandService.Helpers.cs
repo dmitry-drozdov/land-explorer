@@ -839,8 +839,10 @@ namespace MarkupServer
 				var gqlFile = Path.GetFullPath(gqlFile1);
 				var txt = File.ReadAllText(gqlFile);
 				Node root;
+				_swParse.Start();
 				using (Tracing.Tracer.BuildSpan("ParseGql").StartActive())
 					root = graphqlParser.Parse(txt).Item1;
+				_swParse.Stop();
 
 				foreach (var typeDef in GetGqlTypeDefs(root))
 				{
@@ -869,9 +871,11 @@ namespace MarkupServer
 
 			// Мешки соседей — единой реализацией VPTreeLib по всем полям проекта
 			// (группировка по файлу и родителю, IDF по всему набору).
+			_swBags.Start();
 			AssignNeighborBags(gqlAnchors
 				.Where(x => string.Equals(x.AnchorKind, AnchorKindGqlField, StringComparison.OrdinalIgnoreCase))
 				.ToList());
+			_swBags.Stop();
 			return count;
 		}
 
@@ -1525,6 +1529,7 @@ namespace MarkupServer
 			gqlAnchors = new List<TreeNode>();
 			tsAnchors = new List<TreeNode>();
 
+			StartScanTimings();
 			nodesById.Clear();
 			Tracing.Init();
 
@@ -1550,7 +1555,9 @@ namespace MarkupServer
 				foreach (var tsFile in tsFiles)
 				{
 					var txt = File.ReadAllText(tsFile);
+					_swParse.Start();
 					var root = typescriptParser.Parse(txt).Item1;
+					_swParse.Stop();
 					var nodesPerClass = GetTsNodes(root);
 					foreach (var nodes in nodesPerClass)
 					{
@@ -1564,8 +1571,11 @@ namespace MarkupServer
 				}
 
 				// Раньше у TS-якорей NeighborBag не строился вовсе (аудит 2026-08, §3.4).
+				_swBags.Start();
 				AssignNeighborBags(tsAnchors);
+				_swBags.Stop();
 			}
+			FinishScanTimings();
 		}
 
 		private void Debug(string msg)

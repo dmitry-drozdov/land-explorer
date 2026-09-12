@@ -9,6 +9,7 @@ using System.Runtime.InteropServices;
 // из модели COM задайте для атрибута ComVisible этого типа значение true.
 [assembly: ComVisible(false)]
 [assembly: InternalsVisibleTo("MarkupServer.Tests")]
+[assembly: InternalsVisibleTo("AnchorExtractCli")]
 
 // Следующий GUID представляет идентификатор typelib, если этот проект доступен из модели COM
 [assembly: Guid("8d0ed116-3cbe-4e78-bbe7-2f675ae40af5")]

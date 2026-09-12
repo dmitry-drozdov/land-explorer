@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using MarkupServer;
@@ -39,16 +40,22 @@ static class Program
 
 		Environment.SetEnvironmentVariable("LAND_STITCH_DISABLE", "1");
 
-		var jobs = new List<(string folder, string outPath, string relRoot)>();
+		// --timing out.csv [--repeats R]: время сканирования по заданиям (разбор LanD / извлечение якорей / мешки), медианы по R повторам;
+		// извлечение = всё сканирование минус разбор и мешки (LandService.ScanTimings). Для замеров полного цикла (e11/e12 extract_cost).
+		var timingPath = a.TryGetValue("timing", out var tp) ? tp : null;
+		int repeats = a.TryGetValue("repeats", out var rp) ? Math.Max(1, int.Parse(rp, CultureInfo.InvariantCulture)) : 1;
+		var timingRows = new List<string>();
+
+		var jobs = new List<(string folder, string outPath, string relRoot, string label)>();
 		if (a.TryGetValue("jobs", out var jobsPath))
 		{
 			var arr = JArray.Parse(File.ReadAllText(jobsPath));
 			foreach (var j in arr)
-				jobs.Add((j["folder"]!.ToString(), j["out"]!.ToString(), j["relRoot"]?.ToString()));
+				jobs.Add((j["folder"]!.ToString(), j["out"]!.ToString(), j["relRoot"]?.ToString(), j["label"]?.ToString()));
 		}
 		else
 		{
-			jobs.Add((a["folder"], a["out"], a.TryGetValue("rel-root", out var rr) ? rr : null));
+			jobs.Add((a["folder"], a["out"], a.TryGetValue("rel-root", out var rr) ? rr : null, null));
 		}
 
 		var svc = new LandService();
@@ -61,15 +68,23 @@ static class Program
 		});
 
 		int done = 0, failed = 0;
-		foreach (var (folder, outPath, relRoot) in jobs)
+		foreach (var (folder, outPath, relRoot, label) in jobs)
 		{
 			try
 			{
 				var full = Path.GetFullPath(folder);
 				var storePath = Path.Combine(full, ".land", "anchors.json");
-				if (File.Exists(storePath)) File.Delete(storePath);
-
-				await svc.ListAnchorsAsync(new ListTreeParams { folderPath = full, preferCache = false, forceRescan = true });
+				var parseMs = new List<double>(); var extractMs = new List<double>(); var bagsMs = new List<double>(); var scanMs = new List<double>(); var listMs = new List<double>();
+				for (int rep = 0; rep < repeats; rep++)
+				{
+					if (File.Exists(storePath)) File.Delete(storePath);
+					var swList = Stopwatch.StartNew();
+					await svc.ListAnchorsAsync(new ListTreeParams { folderPath = full, preferCache = false, forceRescan = true });
+					swList.Stop();
+					listMs.Add(swList.Elapsed.TotalMilliseconds);
+					var t = svc.LastScanTimings;
+					if (t != null) { parseMs.Add(t.ParseMs); extractMs.Add(t.ExtractMs); bagsMs.Add(t.BagsMs); scanMs.Add(t.TotalMs); }
+				}
 
 				if (!File.Exists(storePath))
 					throw new InvalidOperationException("server did not write " + storePath);
@@ -116,6 +131,9 @@ static class Program
 
 				Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath)) ?? ".");
 				File.WriteAllText(outPath, JsonConvert.SerializeObject(outList, Formatting.None), new UTF8Encoding(false));
+				if (timingPath != null && parseMs.Count > 0)
+					timingRows.Add(string.Join(",", Csv(label ?? folder), Csv(folder), outList.Count.ToString(CultureInfo.InvariantCulture), repeats.ToString(CultureInfo.InvariantCulture),
+						Median(parseMs), Median(extractMs), Median(bagsMs), Median(scanMs), Median(listMs)));
 				done++;
 				Console.Error.WriteLine($"[extract] {folder} -> {outPath}: {outList.Count} fields");
 			}
@@ -125,7 +143,25 @@ static class Program
 				Console.Error.WriteLine($"[extract] FAILED {folder}: {ex.Message}");
 			}
 		}
+		if (timingPath != null)
+		{
+			Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(timingPath)) ?? ".");
+			File.WriteAllLines(timingPath, new[] { "label,folder,n_fields,repeats,ms_parse,ms_extract,ms_bags,ms_scan_total,ms_list_anchors" }.Concat(timingRows), new UTF8Encoding(false));
+		}
 		Console.Error.WriteLine($"[extract] done={done} failed={failed}");
 		return failed == 0 ? 0 : 1;
+	}
+
+	static string Median(List<double> xs)
+	{
+		var s = xs.OrderBy(x => x).ToList();
+		double m = s.Count % 2 == 1 ? s[s.Count / 2] : (s[s.Count / 2 - 1] + s[s.Count / 2]) / 2.0;
+		return m.ToString("R", CultureInfo.InvariantCulture);
+	}
+
+	static string Csv(string s)
+	{
+		s ??= "";
+		return s.IndexOfAny(new[] { ',', '"', '\n' }) >= 0 ? "\"" + s.Replace("\"", "\"\"") + "\"" : s;
 	}
 }
