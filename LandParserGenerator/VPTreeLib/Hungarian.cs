@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -12,9 +12,17 @@ namespace VPTree
 	public static class Hungarian
 	{
 		// Classic O(n^3) Hungarian on doubles; input must be square NxN (N>=1), costs >= 0
-		public static double MinCost(double[,] cost)
+		public static double MinCost(double[,] cost) => Solve(cost, null);
+
+		/// <summary>
+		/// Минимальная суммарная стоимость назначения строк столбцам; если передан <paramref name="rowToCol"/>
+		/// (длина N), в него записывается само назначение: rowToCol[i] — столбец строки i.
+		/// Детерминирован: результат зависит только от матрицы (при равных стоимостях — первый найденный).
+		/// </summary>
+		public static double Solve(double[,] cost, int[]? rowToCol)
 		{
 			int n = cost.GetLength(0);
+			if (cost.GetLength(1) != n) throw new ArgumentException("Hungarian.Solve expects a square matrix");
 			var u = new double[n + 1];
 			var v = new double[n + 1];
 			var p = new int[n + 1];
@@ -55,7 +63,15 @@ namespace VPTree
 					j0 = j1;
 				} while (j0 != 0);
 			}
-			return -v[0];
+
+			double total = 0.0;
+			for (int j = 1; j <= n; j++)
+			{
+				if (p[j] == 0) continue;
+				if (rowToCol != null) rowToCol[p[j] - 1] = j - 1;
+				total += cost[p[j] - 1, j - 1];
+			}
+			return total;
 		}
 	}
 }

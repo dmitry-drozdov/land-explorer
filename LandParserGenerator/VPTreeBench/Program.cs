@@ -14,6 +14,7 @@ using VPTree;
 //   knn          — VP-дерево vs полный перебор: точность, время, число вычислений расстояния
 //   pairs        — расстояния (и компоненты) для заданных пар: сверка с Python-портом
 //   determinism  — повторные построения индекса: побайтовая идентичность результата
+//   assign-batch — предпроход точного ключа + k-NN + назначение один-к-одному с отказом (AssignmentRebind), e11/e12
 //
 // Все числа — Invariant culture, seed фиксирован, вход канонизируется CanonicalOrder.Sort.
 // =====================================================================================
@@ -38,6 +39,7 @@ static class Program
 				case "determinism": return Determinism(args);
 				case "build-cost": return BuildCost(args);
 				case "save-index": return SaveIndex(args);
+				case "assign-batch": return AssignBatch(args);
 				default: Usage(); return 2;
 			}
 		}
@@ -221,6 +223,7 @@ static class Program
 
 	static string Get(Dictionary<string, string> a, string k, string def = null) => a.TryGetValue(k, out var v) ? v : def;
 	static int GetInt(Dictionary<string, string> a, string k, int def) => a.TryGetValue(k, out var v) ? int.Parse(v, CultureInfo.InvariantCulture) : def;
+	static double GetDouble(Dictionary<string, string> a, string k, double def) => a.TryGetValue(k, out var v) ? double.Parse(v, CultureInfo.InvariantCulture) : def;
 
 	static Dist.Weights MakeWeights(Dictionary<string, string> a)
 	{
@@ -539,6 +542,143 @@ static class Program
 		if (!string.IsNullOrEmpty(pqPath))
 			AppendCsv(pqPath, "label,k,query_id,true_id,has_gt,vp_top1,vp_d1,vp_d2,vp_top2,vp_ms,bf_ms,vp_calls,mismatch", pqRows);
 		Console.Error.WriteLine($"[knn-batch] done {done} jobs, {pqRows.Count} query rows");
+		return 0;
+	}
+
+
+	// assign-batch: полный шаг перепривязки VP-дерева на парах манифеста knn-batch — предпроход точного ключа
+	// (AnchorKeys.CanonExact, один-к-одному: ключ единственный и среди запросов, и в индексе), k ближайших по дереву,
+	// построенному над незанятыми якорями новой версии, затем назначение один-к-одному с отказом
+	// (VPTreeLib.AssignmentRebind — тот же код, что в сервере) с одной или несколькими ценами отказа (--reject auto|0.30,...).
+	// Выход: по парам (время шагов, компоненты, статусы) и по запросам (решение, Δ, отношение, компонента, k ближайших
+	// с расстояниями — для сверки с Python-реализацией и поточечного правила на тех же списках).
+	static int AssignBatch(Dictionary<string, string> a)
+	{
+		var manifest = JArray.Parse(File.ReadAllText(Get(a, "manifest") ?? throw new ArgumentException("--manifest")));
+		var w = MakeWeights(a);
+		var bags = BagKind(a);
+		int window = GetInt(a, "window", 4);
+		int k = GetInt(a, "k", 3);
+		double tau = GetDouble(a, "tau", 0.30), margin = GetDouble(a, "margin", 0.30);
+		int enumLimit = GetInt(a, "enum-limit", 10), kBest = GetInt(a, "kbest", 3);
+		bool prepass = GetInt(a, "prepass", 1) != 0;
+		var rejects = (Get(a, "reject") ?? "auto").Split(',')
+			.Select(x => x.Trim() == "auto" ? tau / (1.0 - margin) : double.Parse(x, CultureInfo.InvariantCulture)).ToList();
+		var outPath = Get(a, "out"); var pqPath = Get(a, "per-query");
+		var pairRows = new List<string>(); var pqRows = new List<string>();
+		Func<MethodAnchor, MethodAnchor, double> dist = (x, y) => Dist.AnchorDistance(x, y, w);
+		var sw = new Stopwatch();
+		int done = 0;
+		foreach (var job in manifest.OfType<JObject>())
+		{
+			string label = job["label"]?.ToString() ?? "";
+			var index = CanonicalOrder.Sort(LoadAnchors(job["index"]!.ToString()));
+			var queries = LoadAnchors(job["queries"]!.ToString());
+			Dictionary<string, string> gt = null;
+			var gtPath = job["gt"]?.ToString();
+			if (!string.IsNullOrEmpty(gtPath))
+				gt = JObject.Parse(File.ReadAllText(gtPath)).Properties().ToDictionary(p => p.Name, p => p.Value.Type == JTokenType.Null ? null : p.Value.ToString());
+			if (index.Count == 0 || queries.Count == 0) { done++; continue; }
+			AnchorsIO.BuildNeighborBags(index, bags, window);
+			AnchorsIO.BuildNeighborBags(queries, bags, window);
+
+			// предпроход точного ключа: как ExactHashRebinder сервера — ключ parent|method|args>return, один-к-одному
+			sw.Restart();
+			var exact = new Dictionary<int, int>();      // позиция запроса → позиция в индексе
+			var claimed = new HashSet<int>();
+			if (prepass)
+			{
+				var byKeyIndex = new Dictionary<string, List<int>>(StringComparer.Ordinal);
+				for (int i = 0; i < index.Count; i++)
+				{
+					var key = AnchorKeys.CanonExact(index[i]);
+					if (!byKeyIndex.TryGetValue(key, out var l)) byKeyIndex[key] = l = new List<int>();
+					l.Add(i);
+				}
+				var byKeyQuery = new Dictionary<string, List<int>>(StringComparer.Ordinal);
+				for (int q = 0; q < queries.Count; q++)
+				{
+					var key = AnchorKeys.CanonExact(queries[q]);
+					if (!byKeyQuery.TryGetValue(key, out var l)) byKeyQuery[key] = l = new List<int>();
+					l.Add(q);
+				}
+				foreach (var kv in byKeyQuery)
+					if (kv.Value.Count == 1 && byKeyIndex.TryGetValue(kv.Key, out var l) && l.Count == 1)
+					{
+						exact[kv.Value[0]] = l[0];
+						claimed.Add(l[0]);
+					}
+			}
+			sw.Stop();
+			double prepassMs = sw.Elapsed.TotalMilliseconds;
+
+			var rest = new List<MethodAnchor>(index.Count);
+			for (int i = 0; i < index.Count; i++) if (!claimed.Contains(i)) rest.Add(index[i]);
+			sw.Restart();
+			var tree = rest.Count > 0 ? new VPTree<MethodAnchor>(rest, dist, 42) : null;
+			sw.Stop();
+			double treeMs = sw.Elapsed.TotalMilliseconds;
+
+			var pts = new List<AssignmentRebind.Point>();
+			var topk = new Dictionary<int, List<VPTree<MethodAnchor>.KNNResult>>();
+			sw.Restart();
+			for (int q = 0; q < queries.Count; q++)
+			{
+				if (exact.ContainsKey(q)) continue;
+				var knn = tree != null ? tree.KNearest(queries[q], k) : new List<VPTree<MethodAnchor>.KNNResult>();
+				topk[q] = knn;
+				var pt = new AssignmentRebind.Point { Index = q };
+				foreach (var r in knn) pt.Candidates.Add(new AssignmentRebind.Candidate(r.Index, r.Dist));
+				pts.Add(pt);
+			}
+			sw.Stop();
+			double knnMs = sw.Elapsed.TotalMilliseconds;
+
+			foreach (double reject in rejects)
+			{
+				var opt = new AssignmentRebind.Options { Tau = tau, Margin = margin, RejectCost = reject, EnumerateLimit = enumLimit, KBest = kBest };
+				sw.Restart();
+				var result = AssignmentRebind.Solve(pts, opt);
+				sw.Stop();
+				double assignMs = sw.Elapsed.TotalMilliseconds;
+				var decByQ = result.Decisions.ToDictionary(d => d.Point, d => d);
+				string rs = reject.ToString("0.####", CultureInfo.InvariantCulture);
+				int nAcc = 0, nAmb = 0, nLost = 0;
+				for (int q = 0; q < queries.Count; q++)
+				{
+					string trueId = null; bool hasGt = gt != null && gt.TryGetValue(queries[q].Id, out trueId);
+					string trueCell = hasGt ? (trueId ?? "") : "";
+					if (exact.TryGetValue(q, out int ip))
+					{
+						nAcc++;
+						pqRows.Add(Csv(label, rs, queries[q].Id, trueCell, hasGt, "exact", "accepted", index[ip].Id, 0.0, double.PositiveInfinity, 1.0, -1, 1, "", ""));
+						continue;
+					}
+					var d = decByQ[q];
+					string status;
+					switch (d.Status)
+					{
+						case AssignmentRebind.Status.Accepted: status = "accepted"; nAcc++; break;
+						case AssignmentRebind.Status.Ambiguous: status = "ambiguous"; nAmb++; break;
+						default: status = "lost"; nLost++; break;
+					}
+					var knn = topk[q];
+					string ids = string.Join(";", knn.Select(r => rest[r.Index].Id));
+					string ds = string.Join(";", knn.Select(r => r.Dist.ToString("R", CultureInfo.InvariantCulture)));
+					pqRows.Add(Csv(label, rs, queries[q].Id, trueCell, hasGt, "assign", status, d.Candidate >= 0 ? rest[d.Candidate].Id : "",
+						d.Dist, d.Delta, d.Ratio, d.Component, d.ComponentSize, ids, ds));
+				}
+				var comps = result.Components.Where(c => c.Points.Count >= 2).ToList();
+				pairRows.Add(Csv(label, rs, index.Count, queries.Count, exact.Count, rest.Count, prepassMs, treeMs, knnMs, assignMs,
+					comps.Count, comps.Count > 0 ? comps.Max(c => c.Points.Count) : 0, result.EnumeratedComponents, result.LapComponents, nAcc, nAmb, nLost));
+			}
+			done++;
+			if (done % 50 == 0) Console.Error.WriteLine($"[assign-batch] {done}/{manifest.Count}");
+		}
+		AppendCsv(outPath, "label,reject,n_index,n_queries,n_exact,n_index_rest,prepass_ms,tree_ms,knn_ms,assign_ms,n_components,max_component,n_enumerated,n_lap,n_accepted,n_ambiguous,n_lost", pairRows);
+		if (!string.IsNullOrEmpty(pqPath))
+			AppendCsv(pqPath, "label,reject,query_id,true_id,has_gt,source,status,cand_id,dist,delta,ratio,component,component_size,topk_ids,topk_dists", pqRows);
+		Console.Error.WriteLine($"[assign-batch] done {done} jobs, {pqRows.Count} query rows, rejects={string.Join(",", rejects.Select(r => r.ToString("0.####", CultureInfo.InvariantCulture)))}");
 		return 0;
 	}
 

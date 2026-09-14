@@ -1628,6 +1628,10 @@ namespace MarkupServer
 			public double MaxDistanceRecord = RebindSettings.ReadEnvDouble("LAND_STITCH_TAU_RECORD", 0.45);
 			/// <summary>Минимальный относительный отрыв второго кандидата (d2 - d1) / d2.</summary>
 			public double MinRelativeMargin = RebindSettings.ReadEnvDouble("LAND_STITCH_MARGIN", 0.30);
+			/// <summary>Сколько ближайших кандидатов запрашивать у индекса: рёбра графа назначения (AssignmentRebind).</summary>
+			public int K = (int)RebindSettings.ReadEnvDouble("LAND_STITCH_K", 3);
+			/// <summary>Цена точки без привязки в задаче о назначениях; NaN — tau / (1 − margin) (см. AssignmentRebind).</summary>
+			public double RejectCost = RebindSettings.ReadEnvDouble("LAND_STITCH_REJECT", double.NaN);
 
 			public static StitchSettings Default => new StitchSettings();
 
@@ -1681,7 +1685,7 @@ namespace MarkupServer
 		/// Manual-якоря не трогаем — у них своя ветка восстановления через
 		/// previousManualAnchors в <see cref="ListAnchorsAsync"/>.
 		/// </summary>
-		private StitchResult StitchAutoAnchorIdsFromPrevious(
+		internal StitchResult StitchAutoAnchorIdsFromPrevious(
 			IReadOnlyCollection<TreeNode> previousAuto,
 			IReadOnlyCollection<TreeNode> freshAuto,
 			StitchSettings settings = null)
@@ -1807,11 +1811,15 @@ namespace MarkupServer
 						Tracing.Tracer);
 				}
 
-				// Сначала решения для всех несопоставленных старых якорей (tau + margin),
-				// затем назначение один-к-одному в порядке возрастания дистанции: самые
-				// очевидные соответствия занимают кандидатов первыми (как в RebindEngine).
-				var proposals = new List<(TreeNode Prev, TreeNode Fresh, double Dist)>();
-				foreach (var p in unclaimedPrev)
+				// Назначение один-к-одному с отказом (VPTreeLib.AssignmentRebind, общий код со стендом e11/e12):
+				// для каждого несопоставленного старого якоря — K ближайших по дереву профиля, затем в каждом профиле
+				// задача о назначениях по компонентам связности с маргинальным приёмом: p → c принимается, если лучшее
+				// назначение без этого ребра дороже на Δ и Δ / (d + Δ) ≥ margin. Цена отказа tau / (1 − margin): точка
+				// без конкурентов решается прежним поточечным правилом (tau + margin). Раньше здесь было жадное
+				// назначение по возрастанию d1 (занятый кандидат → Lost).
+				var prevByProfile = new Dictionary<string, List<TreeNode>>(StringComparer.OrdinalIgnoreCase);
+				var pointsByProfile = new Dictionary<string, List<AssignmentRebind.Point>>(StringComparer.OrdinalIgnoreCase);
+				foreach (var p in unclaimedPrev.OrderBy(x => x.Id, StringComparer.Ordinal))
 				{
 					if (!CanParticipateInRebinding(p))
 					{
@@ -1843,34 +1851,55 @@ namespace MarkupServer
 						continue;
 					}
 
-					var cands = tree.KNearest(query, 2);
-					var decision = DecideFor(cands, threshold, settings.MinRelativeMargin);
-					if (decision.Status != RebindStatus.Accepted
-						|| decision.BestIndex < 0 || decision.BestIndex >= profileNodes.Count)
+					var cands = tree.KNearest(query, Math.Max(2, settings.K));
+					if (!prevByProfile.TryGetValue(pk, out var pl))
 					{
-						Debug($"[stitch] '{p.Name}' {decision.Status}: {decision.Reason}");
-						result.Lost.Add(p.Id);
-						continue;
+						prevByProfile[pk] = pl = new List<TreeNode>();
+						pointsByProfile[pk] = new List<AssignmentRebind.Point>();
 					}
-
-					proposals.Add((p, profileNodes[decision.BestIndex], decision.BestDist));
+					var point = new AssignmentRebind.Point { Index = pl.Count };
+					foreach (var c in cands)
+						point.Candidates.Add(new AssignmentRebind.Candidate(c.Index, c.Dist));
+					pl.Add(p);
+					pointsByProfile[pk].Add(point);
 				}
 
-				foreach (var (p, freshNode, dist) in proposals.OrderBy(x => x.Dist).ThenBy(x => x.Prev.Id, StringComparer.Ordinal))
+				foreach (var kv in pointsByProfile.OrderBy(x => x.Key, StringComparer.Ordinal))
 				{
-					if (claimedFresh.Contains(freshNode))
+					var pl = prevByProfile[kv.Key];
+					var profileNodes = nodesByProfile[kv.Key];
+					var solved = AssignmentRebind.Solve(kv.Value, new AssignmentRebind.Options
 					{
-						// Кандидат уже занят более близким старым якорем — этот теряется.
-						Debug($"[stitch] '{p.Name}' Lost: candidate '{freshNode.Name}' already claimed");
-						result.Lost.Add(p.Id);
-						continue;
-					}
+						Tau = settings.GetThreshold(kv.Key),
+						Margin = settings.MinRelativeMargin,
+						RejectCost = settings.RejectCost,
+						KBest = 0,
+					});
+					foreach (var d in solved.Decisions)
+					{
+						var p = pl[d.Point];
+						if (d.Status != AssignmentRebind.Status.Accepted || d.Candidate < 0 || d.Candidate >= profileNodes.Count)
+						{
+							Debug($"[stitch] '{p.Name}' {d.Status}: {d.Reason}");
+							result.Lost.Add(p.Id);
+							continue;
+						}
 
-					var replacedId = freshNode.Id;
-					freshNode.Id = p.Id;
-					freshNode.Comment = p.Comment;
-					claimedFresh.Add(freshNode);
-					result.MatchedFuzzy.Add((p.Id, replacedId, dist));
+						var freshNode = profileNodes[d.Candidate];
+						if (claimedFresh.Contains(freshNode))
+						{
+							// при назначении один-к-одному внутри профиля невозможно; страховка
+							Debug($"[stitch] '{p.Name}' Lost: candidate '{freshNode.Name}' already claimed");
+							result.Lost.Add(p.Id);
+							continue;
+						}
+
+						var replacedId = freshNode.Id;
+						freshNode.Id = p.Id;
+						freshNode.Comment = p.Comment;
+						claimedFresh.Add(freshNode);
+						result.MatchedFuzzy.Add((p.Id, replacedId, d.Dist));
+					}
 				}
 			}
 			else
