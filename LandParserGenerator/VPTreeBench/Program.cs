@@ -14,7 +14,7 @@ using VPTree;
 //   knn          — VP-дерево vs полный перебор: точность, время, число вычислений расстояния
 //   pairs        — расстояния (и компоненты) для заданных пар: сверка с Python-портом
 //   determinism  — повторные построения индекса: побайтовая идентичность результата
-//   assign-batch — предпроход точного ключа + k-NN + назначение один-к-одному с отказом (AssignmentRebind), e11/e12
+//   assign-batch — предпроход точного ключа + k-NN + назначение один-к-одному с отказом (AssignmentRebind), e11/e12/e14; --warmup N — первая пара прогоняется N раз без записи (прогрев JIT)
 //
 // Все числа — Invariant culture, seed фиксирован, вход канонизируется CanonicalOrder.Sort.
 // =====================================================================================
@@ -569,7 +569,9 @@ static class Program
 		Func<MethodAnchor, MethodAnchor, double> dist = (x, y) => Dist.AnchorDistance(x, y, w);
 		var sw = new Stopwatch();
 		int done = 0;
-		foreach (var job in manifest.OfType<JObject>())
+		int warmup = GetInt(a, "warmup", 0);   // прогрев JIT: первая пара решается warmup раз без записи
+		var jobList = manifest.OfType<JObject>().ToList();
+		void RunJob(JObject job, bool record)
 		{
 			string label = job["label"]?.ToString() ?? "";
 			var index = CanonicalOrder.Sort(LoadAnchors(job["index"]!.ToString()));
@@ -578,7 +580,7 @@ static class Program
 			var gtPath = job["gt"]?.ToString();
 			if (!string.IsNullOrEmpty(gtPath))
 				gt = JObject.Parse(File.ReadAllText(gtPath)).Properties().ToDictionary(p => p.Name, p => p.Value.Type == JTokenType.Null ? null : p.Value.ToString());
-			if (index.Count == 0 || queries.Count == 0) { done++; continue; }
+			if (index.Count == 0 || queries.Count == 0) { if (record) done++; return; }
 			AnchorsIO.BuildNeighborBags(index, bags, window);
 			AnchorsIO.BuildNeighborBags(queries, bags, window);
 
@@ -651,7 +653,7 @@ static class Program
 					if (exact.TryGetValue(q, out int ip))
 					{
 						nAcc++;
-						pqRows.Add(Csv(label, rs, queries[q].Id, trueCell, hasGt, "exact", "accepted", index[ip].Id, 0.0, double.PositiveInfinity, 1.0, -1, 1, "", ""));
+						if (record) pqRows.Add(Csv(label, rs, queries[q].Id, trueCell, hasGt, "exact", "accepted", index[ip].Id, 0.0, double.PositiveInfinity, 1.0, -1, 1, "", ""));
 						continue;
 					}
 					var d = decByQ[q];
@@ -665,16 +667,20 @@ static class Program
 					var knn = topk[q];
 					string ids = string.Join(";", knn.Select(r => rest[r.Index].Id));
 					string ds = string.Join(";", knn.Select(r => r.Dist.ToString("R", CultureInfo.InvariantCulture)));
-					pqRows.Add(Csv(label, rs, queries[q].Id, trueCell, hasGt, "assign", status, d.Candidate >= 0 ? rest[d.Candidate].Id : "",
+					if (record) pqRows.Add(Csv(label, rs, queries[q].Id, trueCell, hasGt, "assign", status, d.Candidate >= 0 ? rest[d.Candidate].Id : "",
 						d.Dist, d.Delta, d.Ratio, d.Component, d.ComponentSize, ids, ds));
 				}
 				var comps = result.Components.Where(c => c.Points.Count >= 2).ToList();
-				pairRows.Add(Csv(label, rs, index.Count, queries.Count, exact.Count, rest.Count, prepassMs, treeMs, knnMs, assignMs,
+				if (record) pairRows.Add(Csv(label, rs, index.Count, queries.Count, exact.Count, rest.Count, prepassMs, treeMs, knnMs, assignMs,
 					comps.Count, comps.Count > 0 ? comps.Max(c => c.Points.Count) : 0, result.EnumeratedComponents, result.LapComponents, nAcc, nAmb, nLost));
 			}
+			if (!record) return;
 			done++;
 			if (done % 50 == 0) Console.Error.WriteLine($"[assign-batch] {done}/{manifest.Count}");
 		}
+		if (warmup > 0 && jobList.Count > 0)
+			for (int wi = 0; wi < warmup; wi++) RunJob(jobList[0], false);
+		foreach (var job in jobList) RunJob(job, true);
 		AppendCsv(outPath, "label,reject,n_index,n_queries,n_exact,n_index_rest,prepass_ms,tree_ms,knn_ms,assign_ms,n_components,max_component,n_enumerated,n_lap,n_accepted,n_ambiguous,n_lost", pairRows);
 		if (!string.IsNullOrEmpty(pqPath))
 			AppendCsv(pqPath, "label,reject,query_id,true_id,has_gt,source,status,cand_id,dist,delta,ratio,component,component_size,topk_ids,topk_dists", pqRows);
