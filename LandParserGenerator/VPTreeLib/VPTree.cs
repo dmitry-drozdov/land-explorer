@@ -254,6 +254,49 @@ namespace VPTree
 		}
 
 		/// <summary>
+		/// Запрос по радиусу: все элементы на расстоянии не больше r от query в порядке возрастания (distance, index).
+		/// Обход с фиксированным радиусом отсечения r (в отличие от KNearest, где радиус сужается по k-му найденному):
+		/// поддерево пропускается, если по неравенству треугольника в нём не может быть элемента ближе r
+		/// (те же условия и тот же запас PruneEps, что в SearchKNN). При метричной distance результат совпадает с перебором.
+		/// </summary>
+		public List<KNNResult> WithinRadius(T query, double r)
+		{
+			if (!(r >= 0.0)) throw new ArgumentOutOfRangeException(nameof(r));
+			var found = new List<KNNResult>();
+			SearchRange(_root, query, r, found);
+			found.Sort((x, y) => x.Dist != y.Dist ? x.Dist.CompareTo(y.Dist) : x.Index.CompareTo(y.Index));
+			return found;
+		}
+
+		/// <summary>Полный перебор для запроса по радиусу с тем же порядком (distance, index); эталон для WithinRadius.</summary>
+		public static List<KNNResult> BruteForceWithinRadius(IList<T> items, Func<T, T, double> distance, T query, double r)
+		{
+			if (items == null) throw new ArgumentNullException(nameof(items));
+			if (distance == null) throw new ArgumentNullException(nameof(distance));
+			if (!(r >= 0.0)) throw new ArgumentOutOfRangeException(nameof(r));
+			var found = new List<KNNResult>();
+			for (int i = 0; i < items.Count; i++)
+			{
+				double d = distance(query, items[i]);
+				if (d <= r) found.Add(new KNNResult(i, d));
+			}
+			found.Sort((x, y) => x.Dist != y.Dist ? x.Dist.CompareTo(y.Dist) : x.Index.CompareTo(y.Index));
+			return found;
+		}
+
+		private void SearchRange(Node node, T query, double r, List<KNNResult> found)
+		{
+			if (node == null) return;
+			double dist = _dist(query, _items[node.Index]);
+			if (dist <= r) found.Add(new KNNResult(node.Index, dist));
+			double mu = node.Threshold;
+			// левое поддерево содержит элементы с d(vp, x) < mu: там может быть элемент ближе r, только если dist − r ≤ mu;
+			// правое — элементы с d(vp, x) ≥ mu: только если dist + r ≥ mu. Запас PruneEps — как в SearchKNN.
+			if (node.Left != null && dist - r - PruneEps <= mu) SearchRange(node.Left, query, r, found);
+			if (node.Right != null && dist + r + PruneEps >= mu) SearchRange(node.Right, query, r, found);
+		}
+
+		/// <summary>
 		/// Полный перебор с тем же каноническим порядком (distance, index). Служит эталоном
 		/// для проверки точности индекса и для замеров; индекс для него не нужен.
 		/// </summary>

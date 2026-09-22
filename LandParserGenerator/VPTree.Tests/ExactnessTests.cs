@@ -88,6 +88,29 @@ namespace Tests
 
 		[TestMethod]
 		[TestCategory("VPTree/Exactness")]
+		public void WithinRadius_EqualsBruteForce_OnRealCorpus_ForSeveralRadii()
+		{
+			var corpus = PrepareCorpus();
+			var w = new Dist.Weights();
+			Func<MethodAnchor, MethodAnchor, double> dist = (a, b) => Dist.AnchorDistance(a, b, w);
+			var tree = new VPTree<MethodAnchor>(corpus, dist, 42);
+			var queries = MakeQueries(corpus, 300, seed: 1);
+
+			foreach (double r in new[] { 0.0, 0.30, 0.30 / 0.70, 0.60, 1.0 })
+			{
+				int i = 0;
+				foreach (var q in queries)
+				{
+					var vp = tree.WithinRadius(q, r);
+					var bf = VPTree<MethodAnchor>.BruteForceWithinRadius(corpus, dist, q, r);
+					AssertSameResults(vp, bf, $"r={r:R}, query #{i}");
+					i++;
+				}
+			}
+		}
+
+		[TestMethod]
+		[TestCategory("VPTree/Exactness")]
 		public void KNearest_LegacyArgsNormalization_ReportsMismatches()
 		{
 			// Документирующий тест: в режиме Legacy (не метрика) дерево МОЖЕТ расходиться с перебором.

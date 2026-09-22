@@ -14,7 +14,8 @@ using VPTree;
 //   knn          — VP-дерево vs полный перебор: точность, время, число вычислений расстояния
 //   pairs        — расстояния (и компоненты) для заданных пар: сверка с Python-портом
 //   determinism  — повторные построения индекса: побайтовая идентичность результата
-//   assign-batch — предпроход точного ключа + k-NN + назначение один-к-одному с отказом (AssignmentRebind), e11/e12/e14; --warmup N — первая пара прогоняется N раз без записи (прогрев JIT)
+//   assign-batch — предпроход точного ключа + k-NN + назначение один-к-одному с отказом (AssignmentRebind), e11/e12/e14; --warmup N — первая пара прогоняется N раз без записи (прогрев JIT);
+//                  --k 0 — кандидаты по радиусу (все якоря с d ≤ max(reject), VPTree.WithinRadius) вместо k ближайших; --verify-radius N — при --k 0 сверить первые N запросов каждой пары с перебором (e15)
 //
 // Все числа — Invariant culture, seed фиксирован, вход канонизируется CanonicalOrder.Sort.
 // =====================================================================================
@@ -570,6 +571,9 @@ static class Program
 		var sw = new Stopwatch();
 		int done = 0;
 		int warmup = GetInt(a, "warmup", 0);   // прогрев JIT: первая пара решается warmup раз без записи
+		double radius = rejects.Max();          // --k 0: кандидаты — все якоря с d ≤ radius (при нескольких ценах отказа списки полны для каждой)
+		int verifyRadius = GetInt(a, "verify-radius", 0);
+		long verifyChecked = 0, verifyMismatch = 0;
 		var jobList = manifest.OfType<JObject>().ToList();
 		void RunJob(JObject job, bool record)
 		{
@@ -627,7 +631,8 @@ static class Program
 			for (int q = 0; q < queries.Count; q++)
 			{
 				if (exact.ContainsKey(q)) continue;
-				var knn = tree != null ? tree.KNearest(queries[q], k) : new List<VPTree<MethodAnchor>.KNNResult>();
+				var knn = tree == null ? new List<VPTree<MethodAnchor>.KNNResult>()
+						: (k > 0 ? tree.KNearest(queries[q], k) : tree.WithinRadius(queries[q], radius));
 				topk[q] = knn;
 				var pt = new AssignmentRebind.Point { Index = q };
 				foreach (var r in knn) pt.Candidates.Add(new AssignmentRebind.Candidate(r.Index, r.Dist));
@@ -635,6 +640,20 @@ static class Program
 			}
 			sw.Stop();
 			double knnMs = sw.Elapsed.TotalMilliseconds;
+			long candTotal = topk.Values.Sum(l => (long)l.Count);
+			int vChecked = 0, vMismatch = 0;
+			if (k == 0 && verifyRadius > 0 && tree != null && record)
+			{
+				foreach (var kv in topk)
+				{
+					if (vChecked >= verifyRadius) break;
+					var bf = VPTree<MethodAnchor>.BruteForceWithinRadius(rest, dist, queries[kv.Key], radius);
+					bool same = bf.Count == kv.Value.Count && bf.Zip(kv.Value, (x, y) => x.Index == y.Index).All(z => z);
+					vChecked++;
+					if (!same) vMismatch++;
+				}
+				verifyChecked += vChecked; verifyMismatch += vMismatch;
+			}
 
 			foreach (double reject in rejects)
 			{
@@ -653,7 +672,7 @@ static class Program
 					if (exact.TryGetValue(q, out int ip))
 					{
 						nAcc++;
-						if (record) pqRows.Add(Csv(label, rs, queries[q].Id, trueCell, hasGt, "exact", "accepted", index[ip].Id, 0.0, double.PositiveInfinity, 1.0, -1, 1, "", ""));
+						if (record) pqRows.Add(Csv(label, rs, queries[q].Id, trueCell, hasGt, "exact", "accepted", index[ip].Id, 0.0, double.PositiveInfinity, 1.0, -1, 1, "", "", 0));
 						continue;
 					}
 					var d = decByQ[q];
@@ -667,12 +686,14 @@ static class Program
 					var knn = topk[q];
 					string ids = string.Join(";", knn.Select(r => rest[r.Index].Id));
 					string ds = string.Join(";", knn.Select(r => r.Dist.ToString("R", CultureInfo.InvariantCulture)));
+					int nWithin = knn.Count(r => r.Dist <= reject);
 					if (record) pqRows.Add(Csv(label, rs, queries[q].Id, trueCell, hasGt, "assign", status, d.Candidate >= 0 ? rest[d.Candidate].Id : "",
-						d.Dist, d.Delta, d.Ratio, d.Component, d.ComponentSize, ids, ds));
+						d.Dist, d.Delta, d.Ratio, d.Component, d.ComponentSize, ids, ds, nWithin));
 				}
 				var comps = result.Components.Where(c => c.Points.Count >= 2).ToList();
 				if (record) pairRows.Add(Csv(label, rs, index.Count, queries.Count, exact.Count, rest.Count, prepassMs, treeMs, knnMs, assignMs,
-					comps.Count, comps.Count > 0 ? comps.Max(c => c.Points.Count) : 0, result.EnumeratedComponents, result.LapComponents, nAcc, nAmb, nLost));
+					comps.Count, comps.Count > 0 ? comps.Max(c => c.Points.Count) : 0, result.EnumeratedComponents, result.LapComponents, nAcc, nAmb, nLost,
+					k, candTotal, vChecked, vMismatch));
 			}
 			if (!record) return;
 			done++;
@@ -681,10 +702,11 @@ static class Program
 		if (warmup > 0 && jobList.Count > 0)
 			for (int wi = 0; wi < warmup; wi++) RunJob(jobList[0], false);
 		foreach (var job in jobList) RunJob(job, true);
-		AppendCsv(outPath, "label,reject,n_index,n_queries,n_exact,n_index_rest,prepass_ms,tree_ms,knn_ms,assign_ms,n_components,max_component,n_enumerated,n_lap,n_accepted,n_ambiguous,n_lost", pairRows);
+		AppendCsv(outPath, "label,reject,n_index,n_queries,n_exact,n_index_rest,prepass_ms,tree_ms,knn_ms,assign_ms,n_components,max_component,n_enumerated,n_lap,n_accepted,n_ambiguous,n_lost,k,n_cand_total,verify_checked,verify_mismatch", pairRows);
 		if (!string.IsNullOrEmpty(pqPath))
-			AppendCsv(pqPath, "label,reject,query_id,true_id,has_gt,source,status,cand_id,dist,delta,ratio,component,component_size,topk_ids,topk_dists", pqRows);
-		Console.Error.WriteLine($"[assign-batch] done {done} jobs, {pqRows.Count} query rows, rejects={string.Join(",", rejects.Select(r => r.ToString("0.####", CultureInfo.InvariantCulture)))}");
+			AppendCsv(pqPath, "label,reject,query_id,true_id,has_gt,source,status,cand_id,dist,delta,ratio,component,component_size,topk_ids,topk_dists,n_within", pqRows);
+		Console.Error.WriteLine($"[assign-batch] done {done} jobs, {pqRows.Count} query rows, k={k}{(k == 0 ? $" (radius {radius.ToString("0.####", CultureInfo.InvariantCulture)})" : "")}, rejects={string.Join(",", rejects.Select(r => r.ToString("0.####", CultureInfo.InvariantCulture)))}"
+			+ (verifyRadius > 0 && k == 0 ? $", radius verify: {verifyChecked} checked, {verifyMismatch} mismatches" : ""));
 		return 0;
 	}
 
