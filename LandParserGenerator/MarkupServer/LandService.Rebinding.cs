@@ -183,6 +183,12 @@ namespace MarkupServer
 			public double MinRelativeMargin = ReadEnvDouble("LAND_REBIND_MARGIN", 0.30);
 			/// <summary>Сколько соседей запрашивать у индекса (нужно ≥ 2 для margin).</summary>
 			public int K = 2;
+			/// <summary>Сколько кандидатов показывать пользователю с процентами (калибровка T — по трём ближайшим).</summary>
+			public int KCandidates = 3;
+			/// <summary>Температура процентов (VPTreeLib.AssignmentProbabilities; подобрана на e11 tune).</summary>
+			public double Temperature = ReadEnvDouble("LAND_REBIND_T", AssignmentProbabilities.DefaultTemperature);
+			/// <summary>Цена варианта «не переносить» в процентах: R = tau / (1 − margin), как у шага назначения.</summary>
+			public double RejectCost => Tau / (1.0 - MinRelativeMargin);
 
 			public static RebindSettings Default => new RebindSettings();
 

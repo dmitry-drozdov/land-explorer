@@ -54,6 +54,7 @@ namespace MarkupServer
 				|| contexts.Count == 0)
 			{
 				Debug($"[updateAnchor] no index for profile='{profileKey}'.");
+				RestoreNodesByIdAfterDiskScan();
 				return Task.FromResult(MakeUpdateAnchorResult(null));
 			}
 
@@ -67,7 +68,18 @@ namespace MarkupServer
 				// Теперь при Ambiguous/Lost якорь не переносится: молчаливая ошибочная привязка
 				// хуже отказа.
 				Debug($"[updateAnchor] profile={profileKey} status={decision.Status} {decision.Reason} -> not rebound");
-				return Task.FromResult(MakeUpdateAnchorResult(null));
+				// Вместо молчаливого отказа — кандидаты с процентами: пользователь выбирает сам (land/rebindAnchorTo).
+				var notRebound = MakeUpdateAnchorResult(null);
+				notRebound.st = decision.Status == RebindStatus.Ambiguous ? "ambiguous" : "lost";
+				notRebound.rs = decision.Reason;
+				var choices = CandidatesForUpdate(oldNode, out var pNone);
+				if (choices.Count > 0)
+				{
+					notRebound.cs = choices;
+					notRebound.pz = pNone;
+				}
+				RestoreNodesByIdAfterDiskScan();
+				return Task.FromResult(notRebound);
 			}
 
 			var newNode = nodes[decision.BestIndex];

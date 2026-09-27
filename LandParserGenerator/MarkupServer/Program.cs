@@ -25,6 +25,12 @@ namespace MarkupServer
 		{
 			try
 			{
+				// В режиме --stdio stdout — канал JSON-RPC (Console.OpenStandardOutput ниже). Весь текстовый вывод,
+				// в том числе служебная печать генератора парсеров LanD («declared new manual pair …», «BALANCED»),
+				// уходит в stderr — иначе он попадает в поток протокола перед ответами, и клиент их не разбирает.
+				if (args.Any(a => a == "--stdio"))
+					Console.SetOut(Console.Error);
+
 				var messages = new List<Message>();
 
 				var parser = Builder.BuildParser(

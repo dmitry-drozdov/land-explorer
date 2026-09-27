@@ -632,6 +632,34 @@ namespace MarkupServer
 		}
 
 		/// <summary>
+		/// k ближайших кандидатов якоря в текущем лесу его профиля (узлы леса и расстояния, по возрастанию d).
+		/// Пусто, если профиля нет или лес не построен.
+		/// </summary>
+		private List<(TreeNode Node, double Dist)> NearestInCurrentForests(TreeNode oldNode, int k)
+		{
+			var result = new List<(TreeNode Node, double Dist)>();
+			if (oldNode == null || k <= 0)
+				return result;
+
+			EnsureAnchorFamily(oldNode);
+			var profileKey = GetProfileKey(oldNode);
+			if (string.IsNullOrWhiteSpace(profileKey)
+				|| !currentTreesByProfileKey.TryGetValue(profileKey, out var tree)
+				|| !currentNodesByProfileKey.TryGetValue(profileKey, out var nodes)
+				|| nodes.Count == 0)
+				return result;
+
+			var query = BuildAnchorContext(oldNode);
+			if (query == null)
+				return result;
+
+			foreach (var c in tree.KNearest(query, k))
+				if (c.Index >= 0 && c.Index < nodes.Count)
+					result.Add((nodes[c.Index], c.Dist));
+			return result;
+		}
+
+		/// <summary>
 		/// Перепривязка якоря к текущему лесу профиля с правилом приёма (tau, margin).
 		/// Возвращает новый узел только при статусе Accepted; при Ambiguous/Lost — null,
 		/// подробности в <paramref name="decision"/>.
@@ -1206,6 +1234,11 @@ namespace MarkupServer
 			// _Lost-bucket рендерится первым (сверху), если есть утерянные якоря
 			// со связями. Это привлекает внимание пользователя к необходимости
 			// recovery, и не теряется среди user-групп.
+			// «_Спорные (N)» — первыми: компоненты перепривязки, которые ждут решения пользователя.
+			var disputesRoot = BuildDisputesRoot(markup);
+			if (disputesRoot != null)
+				result.Add(disputesRoot);
+
 			var lostRoot = BuildLostBucketRoot(markup);
 			if (lostRoot != null)
 				result.Add(lostRoot);
@@ -1452,11 +1485,14 @@ namespace MarkupServer
 				Children = new List<TreeNode>(),
 			};
 
+			var disputedIds = PendingDisputedPointIds(markup);
 			foreach (var l in lost)
 			{
 				var displayName = string.IsNullOrWhiteSpace(l.Name) ? "(unnamed)" : l.Name;
 				if (l.WasInGroupNames != null && l.WasInGroupNames.Count > 0)
 					displayName = $"{displayName} (was in: {string.Join(", ", l.WasInGroupNames)})";
+				if (disputedIds.Contains(l.AnchorId))
+					displayName += " · спорно";
 
 				root.Children.Add(new TreeNode
 				{
@@ -1632,6 +1668,8 @@ namespace MarkupServer
 			public int K = (int)RebindSettings.ReadEnvDouble("LAND_STITCH_K", 3);
 			/// <summary>Цена точки без привязки в задаче о назначениях; NaN — tau / (1 − margin) (см. AssignmentRebind).</summary>
 			public double RejectCost = RebindSettings.ReadEnvDouble("LAND_STITCH_REJECT", double.NaN);
+			/// <summary>Температура процентов вариантов спорных компонент (VPTreeLib.AssignmentProbabilities).</summary>
+			public double Temperature = RebindSettings.ReadEnvDouble("LAND_REBIND_T", AssignmentProbabilities.DefaultTemperature);
 
 			public static StitchSettings Default => new StitchSettings();
 
@@ -1650,8 +1688,29 @@ namespace MarkupServer
 			public List<(string PrevId, string FreshIdReplaced, double Dist)> MatchedFuzzy { get; } = new();
 			public List<string> Lost { get; } = new();
 			public List<string> Fresh { get; } = new();
+			/// <summary>Компоненты шага назначения, где хотя бы одна точка осталась спорной (Ambiguous).</summary>
+			public List<StitchDispute> Disputes { get; } = new();
+			/// <summary>Кандидаты непринятых точек (Id старого якоря → новые узлы и расстояния), для подсказок recover.</summary>
+			public Dictionary<string, List<(TreeNode Fresh, double Dist)>> LostCandidates { get; } = new(StringComparer.OrdinalIgnoreCase);
 
 			public int TotalMatched => MatchedExact.Count + MatchedFuzzy.Count;
+		}
+
+		internal sealed class StitchDisputePoint
+		{
+			public TreeNode Prev;
+			public AssignmentRebind.Status Status;
+			/// <summary>Для Accepted: новый узел, которому передан Id точки, и Id этого узла до передачи.</summary>
+			public TreeNode AppliedFresh;
+			public string AppliedFreshId;
+			/// <summary>Рёбра шага назначения (d ≤ цены отказа): по ним считаются варианты компоненты.</summary>
+			public List<(TreeNode Fresh, double Dist)> Candidates = new();
+		}
+
+		internal sealed class StitchDispute
+		{
+			public double RejectCost;
+			public List<StitchDisputePoint> Points = new();
 		}
 
 		private static string NormalizeStitchFilePath(string filePath)
@@ -1875,6 +1934,7 @@ namespace MarkupServer
 						RejectCost = settings.RejectCost,
 						KBest = 0,
 					});
+					var appliedFresh = new Dictionary<int, (TreeNode Node, string FreshId)>();
 					foreach (var d in solved.Decisions)
 					{
 						var p = pl[d.Point];
@@ -1882,6 +1942,10 @@ namespace MarkupServer
 						{
 							Debug($"[stitch] '{p.Name}' {d.Status}: {d.Reason}");
 							result.Lost.Add(p.Id);
+							result.LostCandidates[p.Id] = kv.Value[d.Point].Candidates
+								.Where(c => c.Index >= 0 && c.Index < profileNodes.Count)
+								.Select(c => (profileNodes[c.Index], c.Dist))
+								.ToList();
 							continue;
 						}
 
@@ -1899,6 +1963,32 @@ namespace MarkupServer
 						freshNode.Comment = p.Comment;
 						claimedFresh.Add(freshNode);
 						result.MatchedFuzzy.Add((p.Id, replacedId, d.Dist));
+						appliedFresh[d.Point] = (freshNode, replacedId);
+					}
+
+					// Спорные компоненты: хотя бы одна точка неоднозначна. Сохраняем всю компоненту — точки влияют на
+					// проценты друг друга; принятые точки остаются применёнными, пользователь может их изменить.
+					foreach (var comp in solved.Components)
+					{
+						if (!comp.Points.Any(i => solved.Decisions[i].Status == AssignmentRebind.Status.Ambiguous))
+							continue;
+						var dispute = new StitchDispute { RejectCost = solved.RejectCost };
+						foreach (var i in comp.Points)
+						{
+							var dec = solved.Decisions[i];
+							var pt = new StitchDisputePoint { Prev = pl[i], Status = dec.Status };
+							if (appliedFresh.TryGetValue(i, out var applied))
+							{
+								pt.AppliedFresh = applied.Node;
+								pt.AppliedFreshId = applied.FreshId;
+							}
+							foreach (var c in kv.Value[i].Candidates)
+								if (c.Index >= 0 && c.Index < profileNodes.Count && c.Dist <= solved.RejectCost
+									&& !pt.Candidates.Any(x => ReferenceEquals(x.Fresh, profileNodes[c.Index])))
+									pt.Candidates.Add((profileNodes[c.Index], c.Dist));
+							dispute.Points.Add(pt);
+						}
+						result.Disputes.Add(dispute);
 					}
 				}
 			}

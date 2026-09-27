@@ -104,6 +104,8 @@ namespace MarkupServer
 		/// чтобы клиент мог фильтровать/искать по Label/Kind связей без отдельного RPC.
 		/// </summary>
 		public List<LinkClientV2> links { get; set; }
+		/// <summary>Сколько спорных компонент перепривязки ждут решения пользователя. Не сериализуется если 0.</summary>
+		public int? dq { get; set; }
 	}
 
 	public class UpdateAnchorResultV2
@@ -115,6 +117,12 @@ namespace MarkupServer
 		// field group id + name (2-й уровень группировки: поле внутри GraphQL-типа)
 		public string fg { get; set; }
 		public string fn { get; set; }
+		// Если якорь не перенесён (u == null): решение правила приёма и кандидаты с процентами,
+		// чтобы пользователь выбрал сам (st = "ambiguous" | "lost", rs — причина, pz — процент «не переносить»).
+		public string st { get; set; }
+		public string rs { get; set; }
+		public List<RebindCandidateV2> cs { get; set; }
+		public double? pz { get; set; }
 	}
 
 	public class ListTreeParams
@@ -304,6 +312,12 @@ namespace MarkupServer
 		// Комментарий якоря на момент потери — пользователь может вернуть его
 		// при recoverLostAnchor (или будет использован при отображении).
 		public string Comment { get; set; }
+		// Кандидаты шага назначения на момент потери (живые якоря и расстояния): по ним recoverLostAnchor
+		// предлагает варианты с процентами. У записей, сделанных до сентября 2026, пусто.
+		public List<DisputeCandidate> Candidates { get; set; } = new();
+
+		/// <summary>Пустой список кандидатов в снимок не пишется (формат _Lost прежний).</summary>
+		public bool ShouldSerializeCandidates() => Candidates != null && Candidates.Count > 0;
 	}
 
 	// ----- Params/Result DTO для RPC links -----

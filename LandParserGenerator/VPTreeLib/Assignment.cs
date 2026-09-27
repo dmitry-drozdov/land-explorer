@@ -358,8 +358,9 @@ namespace VPTree
 		}
 
 		/// <summary>k лучших назначений по возрастанию цены (Murty, 1968): разбиение пространства решений
-		/// по строкам-точкам: строки до r фиксируются как в решении узла, ребро строки r запрещается.</summary>
-		private static List<Variant> Murty(double[,] baseCost, int N, int m, int nCols, int kBest)
+		/// по строкам-точкам: строки до r фиксируются как в решении узла, ребро строки r запрещается.
+		/// Используется и для процентов крупных компонент (AssignmentProbabilities).</summary>
+		internal static List<Variant> Murty(double[,] baseCost, int N, int m, int nCols, int kBest)
 		{
 			var result = new List<Variant>();
 			if (kBest <= 0) return result;

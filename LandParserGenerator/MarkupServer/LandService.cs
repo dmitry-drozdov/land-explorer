@@ -131,6 +131,7 @@ namespace MarkupServer
 				r = ToClientRootsV2(roots),
 				fc = fromCache,
 				links = BuildClientUserLinks(),
+				dq = (currentMarkup?.Disputes?.Count ?? 0) > 0 ? currentMarkup.Disputes.Count : null,
 			};
 
 		/// <summary>

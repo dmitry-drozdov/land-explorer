@@ -431,6 +431,8 @@ namespace MarkupServer
 				currentMarkup.LostAnchors = currentMarkup.LostAnchors
 					.Where(l => !string.Equals(l?.AnchorId, p.lostAnchorId, StringComparison.OrdinalIgnoreCase))
 					.ToList();
+				// Точка решена вне окна спорной группы — группа снимается.
+				DropDisputesWithPointUnsafe(p.lostAnchorId);
 
 				PersistMarkupUnsafe("recoverLostAnchor");
 				Debug($"[recoverLostAnchor] {p.lostAnchorId} -> {p.newAnchorId} (members={recoveredMembers}, links={recoveredLinks})");
@@ -481,6 +483,7 @@ namespace MarkupServer
 				currentMarkup.LostAnchors = currentMarkup.LostAnchors
 					.Where(l => !string.Equals(l?.AnchorId, p.lostAnchorId, StringComparison.OrdinalIgnoreCase))
 					.ToList();
+				DropDisputesWithPointUnsafe(p.lostAnchorId);
 
 				PersistMarkupUnsafe("discardLostAnchor");
 				Debug($"[discardLostAnchor] {p.lostAnchorId} (droppedMembers={droppedMembers}, droppedLinks={droppedLinks})");

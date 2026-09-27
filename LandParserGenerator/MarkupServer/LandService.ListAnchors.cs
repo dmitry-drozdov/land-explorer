@@ -51,6 +51,7 @@ namespace MarkupServer
 			// user-групп / пользовательских ссылок, привязанных к стабильному AnchorId.
 			// Аварийное отключение: переменная окружения LAND_STITCH_DISABLE=1.
 			var lostAutoIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+			StitchResult stitchResult = null;
 			if (!string.Equals(Environment.GetEnvironmentVariable("LAND_STITCH_DISABLE"), "1", StringComparison.Ordinal))
 			{
 				var prevAuto = (previousMarkup?.Anchors ?? new List<TreeNode>())
@@ -59,7 +60,7 @@ namespace MarkupServer
 						&& !x.IsManual)
 					.ToList();
 				var freshAutoForStitch = gqlAnchors.Concat(tsAnchors).ToList();
-				var stitchResult = StitchAutoAnchorIdsFromPrevious(prevAuto, freshAutoForStitch);
+				stitchResult = StitchAutoAnchorIdsFromPrevious(prevAuto, freshAutoForStitch);
 
 				// nodesById был заполнен в BuildSemanticMarkupFromDisk по СТАРЫМ Id
 				// тех же node-объектов; после сшивки Id поменялись на месте,
@@ -90,6 +91,7 @@ namespace MarkupServer
 				.ToList();
 
 			var preservedManualAnchors = new List<TreeNode>();
+			var ambiguousManual = new List<(TreeNode Manual, List<(TreeNode Node, double Dist)> Candidates)>();
 			var previousManualAnchors = (previousMarkup?.Anchors ?? new List<TreeNode>())
 				.Where(x => x != null && x.IsManual)
 				.Select(CloneAnchor)
@@ -101,7 +103,8 @@ namespace MarkupServer
 				LoadRebindingForestsFromAnchors(autoAnchors);
 				foreach (var manual in previousManualAnchors)
 				{
-					var rebound = RebindAnchorAgainstCurrentForests(manual) ?? CloneAnchor(manual);
+					var reboundAccepted = RebindAnchorAgainstCurrentForests(manual, out var manualDecision);
+					var rebound = reboundAccepted ?? CloneAnchor(manual);
 					rebound.IsManual = true;
 					if (IsSuppressed(rebound, suppressed))
 						continue;
@@ -116,7 +119,12 @@ namespace MarkupServer
 							&& (x.EndOffset ?? -1) == (rebound.EndOffset ?? -2));
 
 					if (duplicate == null)
+					{
 						preservedManualAnchors.Add(rebound);
+						// Спорная ручная точка остаётся на прежнем месте, но попадает в «_Спорные» с кандидатами.
+						if (reboundAccepted == null && manualDecision.Status == RebindStatus.Ambiguous)
+							ambiguousManual.Add((manual, NearestInCurrentForests(manual, RebindSettings.Default.KCandidates)));
+					}
 				}
 			}
 
@@ -170,10 +178,11 @@ namespace MarkupServer
 					string.Equals(l.SourceAnchorId, lostId, StringComparison.OrdinalIgnoreCase)
 					|| string.Equals(l.TargetAnchorId, lostId, StringComparison.OrdinalIgnoreCase)));
 
-				if (!hasMemberships && !hasLinks)
+				if (!prevAnchorsById.TryGetValue(lostId, out var prevAnchor))
 					continue;
 
-				if (!prevAnchorsById.TryGetValue(lostId, out var prevAnchor))
+				var hasComment = !string.IsNullOrWhiteSpace(prevAnchor.Comment);
+				if (!hasMemberships && !hasLinks && !hasComment)
 					continue;
 
 				var groupNames = prevMembershipsForLost
@@ -199,6 +208,11 @@ namespace MarkupServer
 					LostAtUtc = DateTime.UtcNow,
 					WasInGroupNames = groupNames,
 					Comment = prevAnchor.Comment,
+					Candidates = stitchResult != null && stitchResult.LostCandidates.TryGetValue(lostId, out var lostCands)
+						? lostCands.Where(c => validAnchorIds.Contains(c.Fresh.Id))
+							.Select(c => new DisputeCandidate { AnchorId = c.Fresh.Id, Dist = c.Dist })
+							.ToList()
+						: new List<DisputeCandidate>(),
 				});
 			}
 
@@ -217,6 +231,10 @@ namespace MarkupServer
 			var lostAnchorIdSet = new HashSet<string>(
 				carriedLost.Where(l => !string.IsNullOrWhiteSpace(l?.AnchorId)).Select(l => l.AnchorId),
 				StringComparer.OrdinalIgnoreCase);
+
+			var disputes = BuildDisputesAfterRescan(previousMarkup, stitchResult, ambiguousManual, validAnchorIds, lostAnchorIdSet);
+			if (disputes.Count > 0)
+				Debug($"[listAnchors] disputed components waiting for the user: {disputes.Count}");
 
 			var previousMemberships = previousMarkup?.Memberships ?? new List<UserGroupMembership>();
 			var carriedMemberships = previousMemberships
@@ -256,6 +274,7 @@ namespace MarkupServer
 					Memberships = carriedMemberships,
 					Links = carriedLinks,
 					LostAnchors = carriedLost,
+					Disputes = disputes,
 				};
 				RebuildMarkupRootsUnsafe();
 				ReloadNodesByIdUnsafe();

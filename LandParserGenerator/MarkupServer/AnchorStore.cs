@@ -82,6 +82,7 @@ namespace MarkupServer
 					parsed.Memberships ??= new List<UserGroupMembership>();
 					parsed.Links ??= new List<AnchorLink>();
 					parsed.LostAnchors ??= new List<LostAnchor>();
+					parsed.Disputes ??= new List<DisputedComponent>();
 					data = parsed;
 					RebuildNeighborBags(data, ref error);
 					return true;
@@ -114,6 +115,7 @@ namespace MarkupServer
 						Memberships = legacy.Memberships ?? new List<UserGroupMembership>(),
 						Links = legacy.Links ?? new List<AnchorLink>(),
 						LostAnchors = legacy.LostAnchors ?? new List<LostAnchor>(),
+						Disputes = legacy.Disputes ?? new List<DisputedComponent>(),
 					};
 					RebuildNeighborBags(data, ref error);
 					return true;
@@ -169,6 +171,7 @@ namespace MarkupServer
 				data.Memberships ??= new List<UserGroupMembership>();
 				data.Links ??= new List<AnchorLink>();
 				data.LostAnchors ??= new List<LostAnchor>();
+				data.Disputes ??= new List<DisputedComponent>();
 
 				// Системные auto-pair Links (kind="_autoPair") синтезируются на лету
 				// из Relations и НЕ должны попадать на диск — иначе при загрузке snapshot
@@ -347,5 +350,10 @@ namespace MarkupServer
 		public List<UserGroupMembership> Memberships { get; set; } = new();
 		public List<AnchorLink> Links { get; set; } = new();
 		public List<LostAnchor> LostAnchors { get; set; } = new();
+		/// <summary>Спорные компоненты перепривязки, ждущие решения пользователя (поле добавлено без смены версии: старые файлы читаются с пустым списком).</summary>
+		public List<DisputedComponent> Disputes { get; set; } = new();
+
+		/// <summary>Пустой список в файл не пишется: снимок без спорных компонент байт в байт прежний (серия e13 — размер хранилища).</summary>
+		public bool ShouldSerializeDisputes() => Disputes != null && Disputes.Count > 0;
 	}
 }

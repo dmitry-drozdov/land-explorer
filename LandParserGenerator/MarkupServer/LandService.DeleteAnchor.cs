@@ -126,6 +126,8 @@ namespace MarkupServer
 
 				// Каскад: удаляем все Links, где anchor — source или target.
 				cascadedLinks = RemoveLinksForAnchorUnsafe(p.anchorId);
+				// Спорная группа, где эта точка — одна из точек, снимается.
+				DropDisputesWithPointUnsafe(p.anchorId);
 
 				AddSuppressionForNodeUnsafe(effectiveNode);
 				RebuildRelationsUnsafe();
