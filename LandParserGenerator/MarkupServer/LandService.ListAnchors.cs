@@ -41,6 +41,18 @@ namespace MarkupServer
 					Debug($"[listAnchors] cache load failed: {err}");
 			}
 
+			return Task.FromResult(RescanProject(null, null));
+		}
+
+		/// <summary>
+		/// Полный рескан папки currentFolderPath: сшивка Id авто-якорей (точный ключ, затем назначение по компонентам),
+		/// ручные точки, _Lost, спорные компоненты; снимок сохраняется.
+		/// <paramref name="focusIds"/> — точки, перепривязку которых пользователь попросил явно (Update Anchor): их спорная
+		/// компонента сохраняется, даже если данных пользователя в ней нет. <paramref name="mergedManual"/> получает
+		/// ручные точки, слившиеся с якорем на том же месте (Id ручной точки → Id якоря).
+		/// </summary>
+		private ListTreeResultV2 RescanProject(ICollection<string> focusIds, Dictionary<string, string> mergedManual)
+		{
 			AnchorStore.TryLoad(currentFolderPath, out var previousMarkup, out var previousErr);
 			var suppressed = GetSuppressedKeysSet(previousMarkup);
 
@@ -92,6 +104,7 @@ namespace MarkupServer
 
 			var preservedManualAnchors = new List<TreeNode>();
 			var ambiguousManual = new List<(TreeNode Manual, List<(TreeNode Node, double Dist)> Candidates)>();
+			var manualMergedInto = mergedManual ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 			var previousManualAnchors = (previousMarkup?.Anchors ?? new List<TreeNode>())
 				.Where(x => x != null && x.IsManual)
 				.Select(CloneAnchor)
@@ -124,6 +137,16 @@ namespace MarkupServer
 						// Спорная ручная точка остаётся на прежнем месте, но попадает в «_Спорные» с кандидатами.
 						if (reboundAccepted == null && manualDecision.Status == RebindStatus.Ambiguous)
 							ambiguousManual.Add((manual, NearestInCurrentForests(manual, RebindSettings.Default.KCandidates)));
+					}
+					else if (!string.Equals(duplicate.Id, manual.Id, StringComparison.OrdinalIgnoreCase))
+					{
+						// Ручная точка встала на место, где уже есть якорь (обычно — авто-якорь той же сущности):
+						// точка сливается с ним, её членства, связи и комментарий переходят на этот якорь.
+						// Раньше ручная точка отбрасывалась, а её членства и связи — вместе с ней.
+						manualMergedInto[manual.Id] = duplicate.Id;
+						if (string.IsNullOrWhiteSpace(duplicate.Comment) && !string.IsNullOrWhiteSpace(manual.Comment))
+							duplicate.Comment = manual.Comment;
+						Debug($"[listAnchors] manual anchor {manual.Id} merged into {duplicate.Id} ({duplicate.Name})");
 					}
 				}
 			}
@@ -232,11 +255,20 @@ namespace MarkupServer
 				carriedLost.Where(l => !string.IsNullOrWhiteSpace(l?.AnchorId)).Select(l => l.AnchorId),
 				StringComparer.OrdinalIgnoreCase);
 
-			var disputes = BuildDisputesAfterRescan(previousMarkup, stitchResult, ambiguousManual, validAnchorIds, lostAnchorIdSet);
+			var disputes = BuildDisputesAfterRescan(previousMarkup, stitchResult, ambiguousManual, validAnchorIds, lostAnchorIdSet, focusIds);
 			if (disputes.Count > 0)
 				Debug($"[listAnchors] disputed components waiting for the user: {disputes.Count}");
 
+			// Членства и связи слившихся ручных точек переходят на якорь, с которым они слились (без дублей).
+			string MergedId(string id) => !string.IsNullOrWhiteSpace(id) && manualMergedInto.TryGetValue(id, out var into) ? into : id;
 			var previousMemberships = previousMarkup?.Memberships ?? new List<UserGroupMembership>();
+			if (manualMergedInto.Count > 0)
+				previousMemberships = previousMemberships
+					.Where(m => m != null)
+					.Select(m => new UserGroupMembership { GroupId = m.GroupId, AnchorId = MergedId(m.AnchorId), Order = m.Order, AddedAtUtc = m.AddedAtUtc })
+					.GroupBy(m => $"{m.GroupId}|{m.AnchorId}", StringComparer.OrdinalIgnoreCase)
+					.Select(g => g.First())
+					.ToList();
 			var carriedMemberships = previousMemberships
 				.Where(m => m != null
 					&& !string.IsNullOrWhiteSpace(m.GroupId)
@@ -250,6 +282,19 @@ namespace MarkupServer
 			// Links: оставляем только если обе стороны (source/target) существуют —
 			// либо в живых якорях, либо в _Lost-bucket-е.
 			var previousLinks = previousMarkup?.Links ?? new List<AnchorLink>();
+			if (manualMergedInto.Count > 0)
+			{
+				foreach (var l in previousLinks.Where(l => l != null))
+				{
+					l.SourceAnchorId = MergedId(l.SourceAnchorId);
+					l.TargetAnchorId = MergedId(l.TargetAnchorId);
+				}
+				previousLinks = previousLinks
+					.Where(l => l != null && !string.Equals(l.SourceAnchorId, l.TargetAnchorId, StringComparison.OrdinalIgnoreCase))
+					.GroupBy(l => $"{l.SourceAnchorId}|{l.TargetAnchorId}|{l.Kind ?? ""}", StringComparer.OrdinalIgnoreCase)
+					.Select(g => g.First())
+					.ToList();
+			}
 			bool LinkSideAlive(string anchorId)
 				=> !string.IsNullOrWhiteSpace(anchorId)
 					&& (validAnchorIds.Contains(anchorId) || lostAnchorIdSet.Contains(anchorId));
@@ -284,7 +329,7 @@ namespace MarkupServer
 					Debug($"[listAnchors] saved persisted markup to {AnchorStore.GetStorePath(currentFolderPath)}");
 			}
 
-			return Task.FromResult(MakeListTreeResult(currentMarkup.Roots, null));
+			return MakeListTreeResult(currentMarkup.Roots, null);
 		}
 	}
 }

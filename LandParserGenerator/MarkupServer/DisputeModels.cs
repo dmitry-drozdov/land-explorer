@@ -158,10 +158,4 @@ namespace MarkupServer
 		public double? pz { get; set; }                 // процент «не переносить»
 		public string m { get; set; }
 	}
-
-	public class RebindAnchorToParams
-	{
-		public string anchorId { get; set; }
-		public ParentRebindTargetDescriptor target { get; set; }
-	}
 }

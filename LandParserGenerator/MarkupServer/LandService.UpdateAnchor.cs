@@ -18,105 +18,75 @@ namespace MarkupServer
 			LoadRebindingForestsFromAnchors(gqlAnchors.Concat(tsAnchors));
 		}
 
+		/// <summary>
+		/// Перепривязка точки по запросу пользователя — тем же конвейером, что полный рескан: точный предпроход забирает
+		/// неизменённые поля (занятое другой точкой поле не станет кандидатом), шаг назначения решает компоненты с учётом
+		/// соперников. Уверенные решения применяются, как при рескане; спорная компонента выбранной точки сохраняется,
+		/// даже если данных пользователя в ней нет, — плагин открывает окно выбора. Для точки без соперников назначение
+		/// совпадает с поточечным правилом (R = τ / (1 − m)), так что простой случай не меняется.
+		/// </summary>
 		[JsonRpcMethod("land/updateAnchor", UseSingleObjectParameterDeserialization = true)]
 		public Task<UpdateAnchorResultV2> UpdateAnchorAsync(UpdateAnchorParams p)
 		{
 			if (p == null || string.IsNullOrWhiteSpace(p.anchorId))
 				throw new ArgumentException("anchorId is required");
 
-			if (!nodesById.TryGetValue(p.anchorId, out var oldNode) || oldNode == null)
+			if (!nodesById.TryGetValue(p.anchorId, out var oldNode) || oldNode == null || string.IsNullOrWhiteSpace(currentFolderPath))
 			{
 				Debug($"not found anchor by id [{p.anchorId}] (cache lost). Please run land/listAnchors again.");
 				return Task.FromResult(MakeUpdateAnchorResult(null));
 			}
 
-			EnsureAnchorFamily(oldNode);
-			var profileKey = GetProfileKey(oldNode);
-			if (string.IsNullOrWhiteSpace(profileKey))
-			{
-				Debug($"[updateAnchor] anchor [{p.anchorId}] has unsupported rebind profile.");
-				return Task.FromResult(MakeUpdateAnchorResult(null));
-			}
-
+			var merged = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 			try
 			{
-				BuildCurrentRebindingForestsFromDisk();
+				RescanProject(new[] { p.anchorId }, merged);
 			}
 			catch (Exception ex)
 			{
-				Debug($"[updateAnchor] cannot rebuild rebinding forest: {ex.Message}");
+				Debug($"[updateAnchor] rescan failed: {ex.Message}");
 				return Task.FromResult(MakeUpdateAnchorResult(null));
 			}
 
-			if (!currentTreesByProfileKey.TryGetValue(profileKey, out var tree)
-				|| !currentContextsByProfileKey.TryGetValue(profileKey, out var contexts)
-				|| !currentNodesByProfileKey.TryGetValue(profileKey, out var nodes)
-				|| contexts.Count == 0)
+			lock (markupLock)
 			{
-				Debug($"[updateAnchor] no index for profile='{profileKey}'.");
-				RestoreNodesByIdAfterDiskScan();
-				return Task.FromResult(MakeUpdateAnchorResult(null));
-			}
-
-			var query = BuildAnchorContext(oldNode);
-			var settings = RebindSettings.Default;
-			var cands = tree.KNearest(query, Math.Max(2, settings.K));
-			var decision = DecideFor(cands, settings.Tau, settings.MinRelativeMargin);
-			if (decision.Status != RebindStatus.Accepted)
-			{
-				// Раньше ближайший кандидат принимался безусловно (аудит 2026-08, §3.2.2).
-				// Теперь при Ambiguous/Lost якорь не переносится: молчаливая ошибочная привязка
-				// хуже отказа.
-				Debug($"[updateAnchor] profile={profileKey} status={decision.Status} {decision.Reason} -> not rebound");
-				// Вместо молчаливого отказа — кандидаты с процентами: пользователь выбирает сам (land/rebindAnchorTo).
-				var notRebound = MakeUpdateAnchorResult(null);
-				notRebound.st = decision.Status == RebindStatus.Ambiguous ? "ambiguous" : "lost";
-				notRebound.rs = decision.Reason;
-				var choices = CandidatesForUpdate(oldNode, out var pNone);
-				if (choices.Count > 0)
+				var dispute = (currentMarkup?.Disputes ?? new List<DisputedComponent>()).FirstOrDefault(d => d?.Points != null
+					&& d.Points.Any(pt => string.Equals(pt.AnchorId, p.anchorId, StringComparison.OrdinalIgnoreCase) && pt.Status != DisputeAccepted));
+				if (dispute != null)
 				{
-					notRebound.cs = choices;
-					notRebound.pz = pNone;
+					Debug($"[updateAnchor] {p.anchorId}: disputed component {dispute.Id} ({dispute.Points.Count} points)");
+					return Task.FromResult(new UpdateAnchorResultV2
+					{
+						st = "dispute",
+						did = dispute.Id,
+						rs = dispute.Points.Count > 1
+							? "точка претендует на те же места, что и другие точки — нужен ваш выбор"
+							: "несколько мест в новом коде похожи почти одинаково — нужен ваш выбор",
+					});
 				}
-				RestoreNodesByIdAfterDiskScan();
-				return Task.FromResult(notRebound);
-			}
 
-			var newNode = nodes[decision.BestIndex];
-			Debug($"[updateAnchor] profile={profileKey} status=Accepted {decision.Reason} -> {newNode?.Filepath}:{newNode?.StartOffset}-{newNode?.EndOffset} {newNode?.Name}");
-
-			var updated = CloneAnchor(newNode);
-			updated.Id = p.anchorId;
-			updated.IsManual = oldNode.IsManual;
-			updated.Comment = oldNode.Comment;
-			updated.AnchorFamily = EnsureAnchorFamily(updated);
-
-			var isGql = string.Equals(updated.Language, LangGql, StringComparison.OrdinalIgnoreCase);
-			var parentGroupId = isGql ? GetTypeGroupId(updated) : null;
-			var parentGroupName = isGql ? GetTypeGroupName(updated) : null;
-			var fieldGroupId = isGql ? GetFieldGroupId(updated) : null;
-			var fieldGroupName = isGql ? GetFieldGroupName(updated) : null;
-
-			nodesById[p.anchorId] = updated;
-
-			try
-			{
-				lock (markupLock)
+				var id = merged.TryGetValue(p.anchorId, out var into) ? into : p.anchorId;
+				if (LiveAnchorsByIdUnsafe().TryGetValue(id, out var node))
 				{
-					ReplaceAnchorInMarkupUnsafe(updated);
-					RebuildRelationsUnsafe();
-					RebuildMarkupRootsUnsafe();
-					ReloadNodesByIdUnsafe();
-					if (!AnchorStore.TrySave(currentFolderPath, currentMarkup, out var err))
-						Debug($"[updateAnchor] cannot save anchors cache: {err}");
+					var updated = CloneAnchor(node);
+					var isGql = string.Equals(updated.Language, LangGql, StringComparison.OrdinalIgnoreCase);
+					Debug($"[updateAnchor] {p.anchorId} -> {updated.Filepath}:{updated.StartOffset}-{updated.EndOffset} {updated.Name}");
+					return Task.FromResult(MakeUpdateAnchorResult(updated,
+						isGql ? GetTypeGroupId(updated) : null,
+						isGql ? GetTypeGroupName(updated) : null,
+						isGql ? GetFieldGroupId(updated) : null,
+						isGql ? GetFieldGroupName(updated) : null));
 				}
-			}
-			catch (Exception ex)
-			{
-				Debug($"[updateAnchor] cache persist failed: {ex.Message}");
-			}
 
-			return Task.FromResult(MakeUpdateAnchorResult(updated, parentGroupId, parentGroupName, fieldGroupId, fieldGroupName));
+				var lost = (currentMarkup?.LostAnchors ?? new List<LostAnchor>())
+					.Any(l => string.Equals(l?.AnchorId, p.anchorId, StringComparison.OrdinalIgnoreCase));
+				Debug($"[updateAnchor] {p.anchorId}: {(lost ? "lost (in _Lost)" : "gone")}");
+				return Task.FromResult(new UpdateAnchorResultV2
+				{
+					st = lost ? "lost" : "gone",
+					rs = lost ? "в новом коде нет близкого места — точка в _Lost" : "точки нет в новом коде",
+				});
+			}
 		}
 	}
 }

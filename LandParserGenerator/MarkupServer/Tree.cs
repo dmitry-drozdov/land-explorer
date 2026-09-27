@@ -117,12 +117,12 @@ namespace MarkupServer
 		// field group id + name (2-й уровень группировки: поле внутри GraphQL-типа)
 		public string fg { get; set; }
 		public string fn { get; set; }
-		// Если якорь не перенесён (u == null): решение правила приёма и кандидаты с процентами,
-		// чтобы пользователь выбрал сам (st = "ambiguous" | "lost", rs — причина, pz — процент «не переносить»).
+		// Перепривязка идёт тем же конвейером, что полный рескан. Если точка не встала уверенно (u == null):
+		// st = "dispute" — её спорная компонента ждёт решения в окне (did — Id компоненты);
+		// st = "lost" — близкого места нет, точка в _Lost; st = "gone" — точки нет в новом коде. rs — пояснение.
 		public string st { get; set; }
 		public string rs { get; set; }
-		public List<RebindCandidateV2> cs { get; set; }
-		public double? pz { get; set; }
+		public string did { get; set; }
 	}
 
 	public class ListTreeParams

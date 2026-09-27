@@ -33,8 +33,10 @@ namespace MarkupServer
 			StitchResult stitch,
 			List<(TreeNode Manual, List<(TreeNode Node, double Dist)> Candidates)> ambiguousManual,
 			HashSet<string> validAnchorIds,
-			HashSet<string> lostAnchorIds)
+			HashSet<string> lostAnchorIds,
+			ICollection<string> focusIds = null)
 		{
+			var focus = new HashSet<string>(focusIds ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
 			var memberIds = new HashSet<string>(
 				(previousMarkup?.Memberships ?? new List<UserGroupMembership>())
 					.Where(m => !string.IsNullOrWhiteSpace(m?.AnchorId)).Select(m => m.AnchorId),
@@ -72,8 +74,9 @@ namespace MarkupServer
 					return dp;
 				}).ToList();
 
-				// Спрашиваем пользователя, только если под вопросом его данные: принятая точка уже применена уверенно.
-				if (!points.Any(x => x.Status != DisputeAccepted && x.HasUserData))
+				// Спрашиваем пользователя, только если под вопросом его данные (принятая точка уже применена уверенно)
+				// или он сам попросил перепривязать эту точку (Update Anchor).
+				if (!points.Any(x => x.Status != DisputeAccepted && (x.HasUserData || focus.Contains(x.AnchorId))))
 					continue;
 				result.Add(new DisputedComponent { Id = MakeDisputeId(points), CreatedAtUtc = now, RejectCost = sd.RejectCost, Points = points });
 			}
@@ -594,17 +597,6 @@ namespace MarkupServer
 				Rename(l?.Candidates);
 		}
 
-		/// <summary>
-		/// Разбор файлов для леса перепривязки (BuildSemanticMarkupFromDisk) заполняет nodesById узлами с новыми Id.
-		/// Если якорь в итоге не перенесён, словарь возвращается к снимку разметки — иначе следующие вызовы
-		/// (rebindAnchorTo, deleteAnchor, …) не находят якорь по Id.
-		/// </summary>
-		private void RestoreNodesByIdAfterDiskScan()
-		{
-			lock (markupLock)
-				ReloadNodesByIdUnsafe();
-		}
-
 		/// <summary>Точка снята со спорной компоненты вне окна (recover/discard/delete): компонента снимается целиком.</summary>
 		private void DropDisputesWithPointUnsafe(string anchorId)
 		{
@@ -656,81 +648,6 @@ namespace MarkupServer
 				var list = MakeRebindCandidates(cands, r > 0 ? r : RebindSettings.Default.RejectCost, out var pNone);
 				return Task.FromResult(new RebindCandidatesResultV2 { cs = list, pz = pNone });
 			}
-		}
-
-		/// <summary>Кандидаты якоря в текущем коде с процентами (для «Update Anchor», когда правило приёма не уверено).</summary>
-		private List<RebindCandidateV2> CandidatesForUpdate(TreeNode oldNode, out double pNone)
-		{
-			var rs = RebindSettings.Default;
-			var cands = NearestInCurrentForests(oldNode, rs.KCandidates);
-			return MakeRebindCandidates(cands, rs.RejectCost, out pNone);
-		}
-
-		[JsonRpcMethod("land/rebindAnchorTo", UseSingleObjectParameterDeserialization = true)]
-		public Task<UpdateAnchorResultV2> RebindAnchorToAsync(RebindAnchorToParams p)
-		{
-			if (p == null || string.IsNullOrWhiteSpace(p.anchorId))
-				throw new ArgumentException("anchorId is required");
-			if (p.target == null)
-				throw new ArgumentException("target is required");
-
-			// якорь — из снимка разметки: nodesById мог быть перезаписан разбором с диска (updateAnchor без приёма)
-			TreeNode oldNode;
-			lock (markupLock)
-				oldNode = LiveAnchorsByIdUnsafe().TryGetValue(p.anchorId, out var found) ? found : null;
-			if (oldNode == null)
-			{
-				Debug($"[rebindAnchorTo] not found anchor by id [{p.anchorId}]. Please run land/listAnchors again.");
-				return Task.FromResult(MakeUpdateAnchorResult(null));
-			}
-
-			var profileKey = GetProfileKey(oldNode);
-			try
-			{
-				BuildCurrentRebindingForestsFromDisk();
-			}
-			catch (Exception ex)
-			{
-				Debug($"[rebindAnchorTo] cannot rebuild rebinding forest: {ex.Message}");
-				RestoreNodesByIdAfterDiskScan();
-				return Task.FromResult(MakeUpdateAnchorResult(null));
-			}
-
-			// цель — только среди кандидатов текущего кода того же профиля
-			var newNode = string.IsNullOrWhiteSpace(profileKey) || !currentNodesByProfileKey.TryGetValue(profileKey, out var nodes)
-				? null
-				: nodes.FirstOrDefault(n => IsSameTarget(n, p.target));
-			if (newNode == null)
-			{
-				Debug($"[rebindAnchorTo] selected target is stale for anchor [{p.anchorId}].");
-				RestoreNodesByIdAfterDiskScan();
-				return Task.FromResult(MakeUpdateAnchorResult(null));
-			}
-
-			var updated = CloneAnchor(newNode);
-			updated.Id = p.anchorId;
-			updated.IsManual = oldNode.IsManual;
-			updated.Comment = oldNode.Comment;
-			updated.AnchorFamily = EnsureAnchorFamily(updated);
-
-			var isGql = string.Equals(updated.Language, LangGql, StringComparison.OrdinalIgnoreCase);
-			var parentGroupId = isGql ? GetTypeGroupId(updated) : null;
-			var parentGroupName = isGql ? GetTypeGroupName(updated) : null;
-			var fieldGroupId = isGql ? GetFieldGroupId(updated) : null;
-			var fieldGroupName = isGql ? GetFieldGroupName(updated) : null;
-
-			nodesById[p.anchorId] = updated;
-			lock (markupLock)
-			{
-				ReplaceAnchorInMarkupUnsafe(updated);
-				RebuildRelationsUnsafe();
-				RebuildMarkupRootsUnsafe();
-				ReloadNodesByIdUnsafe();
-				if (!AnchorStore.TrySave(currentFolderPath, currentMarkup, out var err))
-					Debug($"[rebindAnchorTo] cannot save anchors cache: {err}");
-			}
-			Debug($"[rebindAnchorTo] {p.anchorId} -> {updated.Filepath}:{updated.StartOffset}-{updated.EndOffset} {updated.Name} (chosen by user)");
-			return Task.FromResult(MakeUpdateAnchorResult(updated, parentGroupId, parentGroupName, fieldGroupId, fieldGroupName));
 		}
 	}
 }

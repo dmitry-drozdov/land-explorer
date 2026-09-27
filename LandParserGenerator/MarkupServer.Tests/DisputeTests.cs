@@ -268,36 +268,111 @@ public class DisputeTests
 		Assert.IsNull(after.dq, "the point was resolved elsewhere — the dispute is dropped");
 	}
 
+	// ---- Update Anchor: тот же конвейер, что полный рескан
+
+	private const string SchemaGetUser = Types + "type Query {\n  getUser(id: ID!): User\n  listOrders(limit: Int!): [User!]!\n}\n";
+	private const string SchemaGetUserById = Types + "type Query {\n  getUserById(id: ID!): User\n  listOrders(limit: Int!): [User!]!\n}\n";
+	private const string SchemaUserUsers = Types + "type Query {\n  getUser(id: ID!): User\n  getUsers(limit: Int!): [User!]!\n}\n";
+	private const string SchemaUserAllUsers = Types + "type Query {\n  getUser(id: ID!): User\n  getAllUsers(limit: Int!): [User!]!\n}\n";
+
 	[TestMethod]
-	public async Task UpdateAnchor_Offers_Candidates_When_Ambiguous_And_RebindAnchorTo_Applies_Choice()
+	public async Task UpdateAnchor_Confident_Point_Moves_Without_A_Window()
+	{
+		WriteSchema(SchemaGetUser);
+		var svc = await CreateInitializedService();
+		var a = Canonical(await ListAsync(svc), "getUser").id;
+
+		WriteSchema(SchemaGetUserById);
+		var res = await svc.UpdateAnchorAsync(new UpdateAnchorParams { anchorId = a });
+		Assert.IsNotNull(res.u, res.rs);
+		Assert.AreEqual(a, res.u.id, "the point keeps its Id");
+		Assert.AreEqual("getUserById", res.u.n);
+		Assert.IsNull(res.st);
+	}
+
+	[TestMethod]
+	public async Task UpdateAnchor_Lone_Uncertain_Point_Opens_Its_Dispute()
 	{
 		WriteSchema(SchemaA);
 		var svc = await CreateInitializedService();
-		var listed = await ListAsync(svc);
-		var a = Canonical(listed, "getUserA").id;
+		var a = Canonical(await ListAsync(svc), "getUserA").id;
 
-		WriteSchema(SchemaXY);
+		WriteSchema(SchemaXY);   // getUserX и getUserY почти одинаково похожи на getUserA
 		var res = await svc.UpdateAnchorAsync(new UpdateAnchorParams { anchorId = a });
-		Assert.IsNull(res.u, "two equally close fields — the rule does not decide");
-		Assert.AreEqual("ambiguous", res.st);
-		Assert.IsNotNull(res.cs);
-		Assert.IsTrue(res.cs.Count >= 2);
-		Assert.AreEqual(1.0, res.cs.Sum(c => c.p) + res.pz.Value, 1e-9);
-		CollectionAssert.AreEquivalent(new[] { "getUserX", "getUserY" }, res.cs.Take(2).Select(c => c.n.n).ToList());
-		Assert.IsTrue(res.cs[0].p >= res.cs[1].p && res.cs[0].d <= res.cs[1].d, "sorted by percentage = by distance");
-		var probs = AssignmentProbabilities.Point(res.cs.Select(c => c.d).ToList(), AssignmentProbabilities.DefaultTemperature, 0.30 / 0.70);
-		for (int i = 0; i < res.cs.Count; i++)
-			Assert.AreEqual(probs[i], res.cs[i].p, 1e-12, "percentages are the calibrated softmax of distances");
+		Assert.IsNull(res.u);
+		Assert.AreEqual("dispute", res.st, res.rs);
+		Assert.IsNotNull(res.did);
 
-		var pick = res.cs.Single(c => c.n.n == "getUserY").n;
-		var applied = await svc.RebindAnchorToAsync(new RebindAnchorToParams
+		var view = await svc.GetDisputeAsync(new GetDisputeParams { disputeId = res.did });
+		Assert.AreEqual(1, view.points.Count, "no rivals — a one-point component");
+		Assert.AreEqual(a, view.points[0].id);
+		var names = view.points[0].o.Where(o => o.t != null).Select(o => o.n).ToList();
+		CollectionAssert.IsSubsetOf(new[] { "getUserX", "getUserY" }, names);
+		Assert.AreEqual(1.0, view.points[0].o.Sum(o => o.p), 1e-9);
+	}
+
+	[TestMethod]
+	public async Task UpdateAnchor_With_Rival_Opens_The_Whole_Component()
+	{
+		var (svc, a, b, _) = await TieScenario(withUserData: false);   // без данных пользователя: рескан бы не спросил
+		var res = await svc.UpdateAnchorAsync(new UpdateAnchorParams { anchorId = a });
+		Assert.AreEqual("dispute", res.st, res.rs);
+		var view = await svc.GetDisputeAsync(new GetDisputeParams { disputeId = res.did });
+		CollectionAssert.AreEquivalent(new[] { a, b }, view.points.Select(pt => pt.id).ToList(), "the rival is in the window too");
+	}
+
+	[TestMethod]
+	public async Task UpdateAnchor_Does_Not_Offer_A_Field_Held_By_Another_Point()
+	{
+		// getUsers переименован в getAllUsers; getUser не менялся. Поточечно ближайший к getUsers — getUser (одна буква),
+		// но это поле занято неизменённой точкой getUser: предпроход точного ключа забирает его, кандидатом оно не будет.
+		WriteSchema(SchemaUserUsers);
+		var svc = await CreateInitializedService();
+		var listed = await ListAsync(svc);
+		var user = Canonical(listed, "getUser").id;
+		var users = Canonical(listed, "getUsers").id;
+
+		WriteSchema(SchemaUserAllUsers);
+		var res = await svc.UpdateAnchorAsync(new UpdateAnchorParams { anchorId = users });
+		if (res.u != null)
+			Assert.AreNotEqual("getUser", res.u.n, "must not steal the field of another point");
+		if (res.st == "dispute")
 		{
-			anchorId = a,
-			target = new ParentRebindTargetDescriptor { filePath = pick.f, startOffset = pick.s, endOffset = pick.e, anchorKind = pick.k },
-		});
-		Assert.IsNotNull(applied.u);
-		Assert.AreEqual(a, applied.u.id);
-		Assert.AreEqual("getUserY", applied.u.n);
+			var view = await svc.GetDisputeAsync(new GetDisputeParams { disputeId = res.did });
+			Assert.IsFalse(view.points.SelectMany(pt => pt.o).Any(o => o.n == "getUser"), "held field is not a candidate");
+		}
+
+		var after = await ListAsync(svc, forceRescan: false);
+		Assert.AreEqual(user, Canonical(after, "getUser").id, "the unchanged point keeps its field");
+	}
+
+	[TestMethod]
+	public async Task Manual_Point_Merging_Into_An_Anchor_Keeps_Its_Membership_And_Comment()
+	{
+		WriteSchema(SchemaGetUser);
+		var svc = await CreateInitializedService();
+		var listed = await ListAsync(svc);
+		var auto = Canonical(listed, "getUser");
+
+		// Удалили авто-якорь и вернули точку вручную: ручная точка на том же месте, подавление снято.
+		await svc.DeleteAnchorAsync(new DeleteAnchorParams { anchorId = auto.id });
+		var added = await svc.AddAnchorAtAsync(new AddAnchorParams { filePath = auto.f, offset = auto.s.Value + 1 });
+		Assert.IsNotNull(added.a, added.m);
+		var manualId = added.a.id;
+		var grp = (await svc.CreateUserGroupAsync(new CreateUserGroupParams { name = "Ручные" })).g;
+		await svc.AddAnchorToGroupAsync(new AddAnchorToGroupParams { anchorId = manualId, groupId = grp.id });
+		await svc.SetCommentAsync(new SetCommentParams { targetId = manualId, comment = "моя точка" });
+
+		// При рескане авто-якорь сущности появляется снова, ручная точка встаёт на его место и сливается с ним.
+		var after = await ListAsync(svc);
+		var live = Canonical(after, "getUser");
+		Assert.IsNotNull(live);
+		var folder = after.r.Single(n => n.id == grp.id);
+		var shadow = folder.c?.SingleOrDefault();
+		Assert.IsNotNull(shadow, "membership must survive the merge");
+		Assert.AreEqual(live.id, shadow.aid, "membership now points to the anchor the manual point merged into");
+		Assert.IsNull(shadow.sys);
+		Assert.AreEqual("моя точка", live.cm, "comment moves with the point");
 	}
 
 	// ---- решение для точек, которые сшивка уже применила: снимок собран вручную
