@@ -1692,6 +1692,11 @@ namespace MarkupServer
 			public List<StitchDispute> Disputes { get; } = new();
 			/// <summary>Кандидаты непринятых точек (Id старого якоря → новые узлы и расстояния), для подсказок recover.</summary>
 			public Dictionary<string, List<(TreeNode Fresh, double Dist)>> LostCandidates { get; } = new(StringComparer.OrdinalIgnoreCase);
+			/// <summary>
+			/// Уверенные пары спорных компонент, которые увидит пользователь: не применены, ждут решения по компоненте целиком
+			/// (Id старого якоря). Эти точки есть и в <see cref="Lost"/>.
+			/// </summary>
+			public List<string> Held { get; } = new();
 
 			public int TotalMatched => MatchedExact.Count + MatchedFuzzy.Count;
 		}
@@ -1703,6 +1708,11 @@ namespace MarkupServer
 			/// <summary>Для Accepted: новый узел, которому передан Id точки, и Id этого узла до передачи.</summary>
 			public TreeNode AppliedFresh;
 			public string AppliedFreshId;
+			/// <summary>
+			/// Для Accepted в компоненте, которую увидит пользователь: место, выбранное решателем (уверенная пара). Id точке
+			/// не передан — компонента применяется целиком, когда пользователь её подтвердит.
+			/// </summary>
+			public TreeNode ProposedFresh;
 			/// <summary>Рёбра шага назначения (d ≤ цены отказа): по ним считаются варианты компоненты.</summary>
 			public List<(TreeNode Fresh, double Dist)> Candidates = new();
 		}
@@ -1743,11 +1753,16 @@ namespace MarkupServer
 		///
 		/// Manual-якоря не трогаем — у них своя ветка восстановления через
 		/// previousManualAnchors в <see cref="ListAnchorsAsync"/>.
+		///
+		/// <paramref name="askUser"/> — точки, из-за которых спорную компоненту покажут пользователю (данные пользователя
+		/// или явная просьба перепривязать): в такой компоненте уверенные пары не применяются, а ждут решения по компоненте
+		/// целиком (<see cref="StitchResult.Held"/>). Без предиката уверенные пары применяются всегда.
 		/// </summary>
 		internal StitchResult StitchAutoAnchorIdsFromPrevious(
 			IReadOnlyCollection<TreeNode> previousAuto,
 			IReadOnlyCollection<TreeNode> freshAuto,
-			StitchSettings settings = null)
+			StitchSettings settings = null,
+			Func<TreeNode, bool> askUser = null)
 		{
 			settings ??= StitchSettings.Default;
 			var result = new StitchResult();
@@ -1934,10 +1949,34 @@ namespace MarkupServer
 						RejectCost = settings.RejectCost,
 						KBest = 0,
 					});
+					// Спорные компоненты, которые увидит пользователь: хотя бы одна точка неоднозначна, и у непринятой точки есть его
+					// данные (или он сам попросил её перепривязать). Их уверенные пары не применяются: компонента применяется целиком,
+					// когда пользователь её подтвердит (решение пользователя 2026-09-28).
+					var held = new HashSet<int>();
+					if (askUser != null)
+						foreach (var comp in solved.Components)
+							if (comp.Points.Any(i => solved.Decisions[i].Status == AssignmentRebind.Status.Ambiguous)
+								&& comp.Points.Any(i => solved.Decisions[i].Status != AssignmentRebind.Status.Accepted && askUser(pl[i])))
+								held.UnionWith(comp.Points);
+
 					var appliedFresh = new Dictionary<int, (TreeNode Node, string FreshId)>();
+					var proposedFresh = new Dictionary<int, TreeNode>();
 					foreach (var d in solved.Decisions)
 					{
 						var p = pl[d.Point];
+						if (d.Status == AssignmentRebind.Status.Accepted && held.Contains(d.Point)
+							&& d.Candidate >= 0 && d.Candidate < profileNodes.Count)
+						{
+							Debug($"[stitch] '{p.Name}' Accepted, held: its component waits for the user");
+							result.Lost.Add(p.Id);
+							result.Held.Add(p.Id);
+							result.LostCandidates[p.Id] = kv.Value[d.Point].Candidates
+								.Where(c => c.Index >= 0 && c.Index < profileNodes.Count)
+								.Select(c => (profileNodes[c.Index], c.Dist))
+								.ToList();
+							proposedFresh[d.Point] = profileNodes[d.Candidate];
+							continue;
+						}
 						if (d.Status != AssignmentRebind.Status.Accepted || d.Candidate < 0 || d.Candidate >= profileNodes.Count)
 						{
 							Debug($"[stitch] '{p.Name}' {d.Status}: {d.Reason}");
@@ -1967,7 +2006,8 @@ namespace MarkupServer
 					}
 
 					// Спорные компоненты: хотя бы одна точка неоднозначна. Сохраняем всю компоненту — точки влияют на
-					// проценты друг друга; принятые точки остаются применёнными, пользователь может их изменить.
+					// проценты друг друга. В компонентах, которые увидит пользователь, уверенные пары не применены (ждут решения
+					// по компоненте целиком); в остальных — применены, как раньше.
 					foreach (var comp in solved.Components)
 					{
 						if (!comp.Points.Any(i => solved.Decisions[i].Status == AssignmentRebind.Status.Ambiguous))
@@ -1982,6 +2022,8 @@ namespace MarkupServer
 								pt.AppliedFresh = applied.Node;
 								pt.AppliedFreshId = applied.FreshId;
 							}
+							if (proposedFresh.TryGetValue(i, out var proposed))
+								pt.ProposedFresh = proposed;
 							foreach (var c in kv.Value[i].Candidates)
 								if (c.Index >= 0 && c.Index < profileNodes.Count && c.Dist <= solved.RejectCost
 									&& !pt.Candidates.Any(x => ReferenceEquals(x.Fresh, profileNodes[c.Index])))

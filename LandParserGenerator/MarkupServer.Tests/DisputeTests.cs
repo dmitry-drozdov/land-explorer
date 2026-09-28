@@ -375,7 +375,124 @@ public class DisputeTests
 		Assert.AreEqual("моя точка", live.cm, "comment moves with the point");
 	}
 
-	// ---- решение для точек, которые сшивка уже применила: снимок собран вручную
+	// ---- уверенная пара в спорной компоненте ждёт решения по компоненте целиком (решение пользователя 2026-09-28)
+	//      findUser → findUsers — уверенная пара (одна буква); getUserA и getUserB делят поле getUserX (ничья),
+	//      и findUser связан с getUserX в пределах цены отказа, поэтому все три точки — одна компонента.
+
+	private const string SchemaABF = Types + "type Query {\n  getUserA(id: ID!): User\n  getUserB(id: ID!): User\n  findUser(id: ID!): User\n  listOrders(limit: Int!): [User!]!\n}\n";
+	private const string SchemaXF = Types + "type Query {\n  getUserX(id: ID!): User\n  findUsers(id: ID!): User\n  listOrders(limit: Int!): [User!]!\n}\n";
+
+	private static TreeNode QueryField(string name, int offset) => new()
+	{
+		Id = $"gql:Query.{name}", Language = "gql", NodeType = "anchor", AnchorKind = "gqlField", Name = name,
+		MethodNameNorm = name, ParentNameRaw = "Query", ParentNameNorm = "Query", ReturnTypeNorm = "User",
+		Args = new List<Arg> { new() { NameNorm = "id", TypeNorm = "ID!" } }, Filepath = "schema/users.graphql",
+		StartOffset = offset, EndOffset = offset + 10,
+	};
+
+	[TestMethod]
+	public void Stitch_Holds_Confident_Pairs_Only_In_Components_The_User_Will_See()
+	{
+		TreeNode[] Prev() => new[] { QueryField("getUserA", 0), QueryField("getUserB", 100), QueryField("findUser", 200) };
+
+		// компоненту увидят (данные пользователя у спорной getUserA): уверенная пара не применена
+		var fresh = new[] { QueryField("getUserX", 0), QueryField("findUsers", 200) };
+		var res = new LandService().StitchAutoAnchorIdsFromPrevious(Prev(), fresh, askUser: p => p.Name == "getUserA");
+		CollectionAssert.AreEqual(new[] { "gql:Query.findUser" }, res.Held);
+		Assert.AreEqual(0, res.MatchedFuzzy.Count);
+		Assert.IsTrue(res.Lost.Contains("gql:Query.findUser"), "the held point waits among the lost");
+		Assert.AreEqual("gql:Query.findUsers", fresh[1].Id, "the proposed place keeps its own Id");
+		var pf = res.Disputes.Single().Points.Single(p => p.Prev.Name == "findUser");
+		Assert.AreEqual(AssignmentRebind.Status.Accepted, pf.Status, "still a confident pair");
+		Assert.AreSame(fresh[1], pf.ProposedFresh);
+		Assert.IsNull(pf.AppliedFresh);
+
+		// компоненту не увидят: уверенная пара применяется сразу, как раньше
+		var fresh2 = new[] { QueryField("getUserX", 0), QueryField("findUsers", 200) };
+		var res2 = new LandService().StitchAutoAnchorIdsFromPrevious(Prev(), fresh2, askUser: _ => false);
+		Assert.AreEqual(0, res2.Held.Count);
+		Assert.AreEqual("gql:Query.findUser", fresh2[1].Id, "the place took the point's Id");
+		Assert.IsNotNull(res2.Disputes.Single().Points.Single(p => p.Prev.Name == "findUser").AppliedFresh);
+	}
+
+	private async Task<(LandService Svc, string A, string B, string F)> HeldScenario(bool membershipOnA)
+	{
+		WriteSchema(SchemaABF);
+		var svc = await CreateInitializedService();
+		var listed = await ListAsync(svc);
+		var a = Canonical(listed, "getUserA").id;
+		var b = Canonical(listed, "getUserB").id;
+		var f = Canonical(listed, "findUser").id;
+		if (membershipOnA)
+		{
+			var grp = await svc.CreateUserGroupAsync(new CreateUserGroupParams { name = "Пользователи" });
+			await svc.AddAnchorToGroupAsync(new AddAnchorToGroupParams { anchorId = a, groupId = grp.g.id });
+		}
+		await svc.SetCommentAsync(new SetCommentParams { targetId = f, comment = "находит пользователя" });
+		WriteSchema(SchemaXF);
+		return (svc, a, b, f);
+	}
+
+	[TestMethod]
+	public async Task Confident_Pair_Of_A_Shown_Dispute_Waits_And_Moves_On_Apply()
+	{
+		var (svc, a, b, f) = await HeldScenario(membershipOnA: true);
+		var after = await ListAsync(svc);
+		Assert.AreEqual(1, after.dq);
+		var findUsers = Canonical(after, "findUsers");
+		Assert.IsNotNull(findUsers);
+		Assert.AreNotEqual(f, findUsers.id, "the confident pair is not applied until the whole component is confirmed");
+		var lostF = Root(after, "lost")?.c.FirstOrDefault(x => x.id == f);
+		Assert.IsNotNull(lostF, "the confident point with a comment waits in _Lost");
+		StringAssert.Contains(lostF.n, "спорно");
+
+		var view = await svc.GetDisputeAsync(new GetDisputeParams());
+		Assert.AreEqual(3, view.points.Count);
+		var pf = view.points.Single(p => p.id == f);
+		Assert.AreEqual("accepted", pf.st);
+		Assert.AreEqual(findUsers.id, pf.auto, "the window marks the confident pair with its proposed place");
+		Assert.AreEqual(findUsers.id, view.top[0].a[view.points.IndexOf(pf)]);
+		Assert.AreEqual("находит пользователя", pf.cm);
+
+		// «Применить» лучший вариант: уверенная пара применяется вместе со всей компонентой
+		var choices = view.points.Select((p, i) => new DisputeChoiceParam { point = p.id, target = view.top[0].a[i] }).ToList();
+		var res = await svc.ResolveDisputeAsync(new ResolveDisputeParams { disputeId = view.id, choices = choices });
+		Assert.AreEqual(true, res.ok, res.m);
+		var applied = await ListAsync(svc, forceRescan: false);
+		Assert.IsNull(applied.dq);
+		Assert.AreEqual(f, Canonical(applied, "findUsers").id, "after confirmation the place carries the point's Id");
+		Assert.AreEqual("находит пользователя", Canonical(applied, "findUsers").cm, "and its comment");
+		Assert.IsFalse(Root(applied, "lost")?.c.Any(x => x.id == f) ?? false, "the point left _Lost");
+
+		// решение сохраняется: следующий рескан не возвращает группу
+		var rescan = await ListAsync(svc);
+		Assert.IsNull(rescan.dq);
+		Assert.AreEqual(f, Canonical(rescan, "findUsers").id);
+	}
+
+	[TestMethod]
+	public async Task Confident_Pair_Is_Applied_At_Once_When_Nobody_Is_Asked()
+	{
+		// у спорных getUserA и getUserB нет данных пользователя — рескан ничего не спрашивает, уверенная пара применяется
+		var (svc, _, _, f) = await HeldScenario(membershipOnA: false);
+		var after = await ListAsync(svc);
+		Assert.IsNull(after.dq);
+		Assert.AreEqual(f, Canonical(after, "findUsers").id);
+		Assert.AreEqual("находит пользователя", Canonical(after, "findUsers").cm);
+	}
+
+	[TestMethod]
+	public async Task UpdateAnchor_On_A_Confident_Point_Of_A_Shown_Dispute_Opens_The_Window()
+	{
+		var (svc, _, _, f) = await HeldScenario(membershipOnA: true);
+		var res = await svc.UpdateAnchorAsync(new UpdateAnchorParams { anchorId = f });
+		Assert.AreEqual("dispute", res.st, res.rs);
+		StringAssert.Contains(res.rs, "уверенно");
+		var view = await svc.GetDisputeAsync(new GetDisputeParams { disputeId = res.did });
+		Assert.AreEqual("accepted", view.points.Single(p => p.id == f).st);
+	}
+
+	// ---- решение для точек, которые сшивка уже применила: снимок собран вручную (снимки до 2026-09-28)
 
 	private async Task<LandService> LoadCraftedSnapshot(PersistedMarkup markup)
 	{

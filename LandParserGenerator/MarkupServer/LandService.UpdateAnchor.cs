@@ -50,8 +50,11 @@ namespace MarkupServer
 
 			lock (markupLock)
 			{
+				// точка не применена: непринятая или уверенная пара, которая ждёт решения по своей компоненте целиком
+				DisputedPoint mine = null;
 				var dispute = (currentMarkup?.Disputes ?? new List<DisputedComponent>()).FirstOrDefault(d => d?.Points != null
-					&& d.Points.Any(pt => string.Equals(pt.AnchorId, p.anchorId, StringComparison.OrdinalIgnoreCase) && pt.Status != DisputeAccepted));
+					&& (mine = d.Points.FirstOrDefault(pt => string.Equals(pt.AnchorId, p.anchorId, StringComparison.OrdinalIgnoreCase)
+						&& (pt.Status != DisputeAccepted || !string.IsNullOrWhiteSpace(pt.ProposedAnchorId)))) != null);
 				if (dispute != null)
 				{
 					Debug($"[updateAnchor] {p.anchorId}: disputed component {dispute.Id} ({dispute.Points.Count} points)");
@@ -59,9 +62,11 @@ namespace MarkupServer
 					{
 						st = "dispute",
 						did = dispute.Id,
-						rs = dispute.Points.Count > 1
-							? "точка претендует на те же места, что и другие точки — нужен ваш выбор"
-							: "несколько мест в новом коде похожи почти одинаково — нужен ваш выбор",
+						rs = mine?.Status == DisputeAccepted
+							? "место для точки найдено уверенно, но соседние точки спорят за те же места — подтвердите группу целиком"
+							: dispute.Points.Count > 1
+								? "точка претендует на те же места, что и другие точки — нужен ваш выбор"
+								: "несколько мест в новом коде похожи почти одинаково — нужен ваш выбор",
 					});
 				}
 

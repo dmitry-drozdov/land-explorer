@@ -13,12 +13,15 @@ namespace MarkupServer
 	/// При полном рескане шаг назначения (сшивка Id, слой 2) решает компоненты точек, претендующих на одних и тех же
 	/// кандидатов. Компонента, где хотя бы одна точка неоднозначна, сохраняется в снимке (PersistedMarkup.Disputes),
 	/// если у какой-нибудь её непринятой точки есть данные пользователя: членство в папке, пользовательская связь,
-	/// комментарий или сама точка ручная. Принятые точки остаются применёнными; непринятые с данными — в _Lost.
+	/// комментарий или сама точка ручная. Такая компонента применяется только целиком, когда пользователь её подтвердит:
+	/// уверенные пары (accepted) в ней до решения не применяются (решение пользователя 2026-09-28); точки с данными
+	/// ждут в _Lost. В снимках до этого решения уверенные пары уже применены (AppliedFreshId) — окно работает и с ними.
 	///
 	/// Окно плагина запрашивает проценты (land/getDispute) при каждом выборе пользователя и применяет итоговую
 	/// расстановку (land/resolveDispute). Проценты — распределение Гиббса по ценам расстановок
-	/// (VPTreeLib.AssignmentProbabilities): процент варианта — вероятность, что верны все строки сразу; процент строки —
-	/// сумма процентов вариантов, где точка переносится именно туда; в строке, выбранной пользователем, — без её выбора.
+	/// (VPTreeLib.AssignmentProbabilities): процент варианта — вероятность, что верны все строки сразу (окно его не
+	/// показывает: в спорной компоненте он почти всегда мал); процент строки — сумма процентов вариантов, где точка
+	/// переносится именно туда; в строке, выбранной пользователем, — без её выбора.
 	/// </summary>
 	public partial class LandService
 	{
@@ -28,15 +31,9 @@ namespace MarkupServer
 
 		// ================================================================ рескан: сборка спорных компонент
 
-		private List<DisputedComponent> BuildDisputesAfterRescan(
-			PersistedMarkup previousMarkup,
-			StitchResult stitch,
-			List<(TreeNode Manual, List<(TreeNode Node, double Dist)> Candidates)> ambiguousManual,
-			HashSet<string> validAnchorIds,
-			HashSet<string> lostAnchorIds,
-			ICollection<string> focusIds = null)
+		/// <summary>Данные пользователя у якоря прошлого снимка: ручная точка, комментарий, членство в папке или пользовательская связь.</summary>
+		private static Func<TreeNode, bool> UserDataPredicate(PersistedMarkup previousMarkup)
 		{
-			var focus = new HashSet<string>(focusIds ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
 			var memberIds = new HashSet<string>(
 				(previousMarkup?.Memberships ?? new List<UserGroupMembership>())
 					.Where(m => !string.IsNullOrWhiteSpace(m?.AnchorId)).Select(m => m.AnchorId),
@@ -48,8 +45,32 @@ namespace MarkupServer
 				if (!string.IsNullOrWhiteSpace(l.SourceAnchorId)) linkIds.Add(l.SourceAnchorId);
 				if (!string.IsNullOrWhiteSpace(l.TargetAnchorId)) linkIds.Add(l.TargetAnchorId);
 			}
-			bool HasUserData(TreeNode a) => a != null
+			return a => a != null
 				&& (a.IsManual || !string.IsNullOrWhiteSpace(a.Comment) || memberIds.Contains(a.Id) || linkIds.Contains(a.Id));
+		}
+
+		/// <summary>
+		/// Точки, из-за которых спорную компоненту покажут пользователю: его данные или явная просьба перепривязать (Update Anchor).
+		/// Тот же признак, что отбор компонент в <see cref="BuildDisputesAfterRescan"/>, — сшивка по нему решает, какие уверенные
+		/// пары не применять до решения пользователя.
+		/// </summary>
+		private static Func<TreeNode, bool> AskUserPredicate(PersistedMarkup previousMarkup, ICollection<string> focusIds)
+		{
+			var hasUserData = UserDataPredicate(previousMarkup);
+			var focus = new HashSet<string>(focusIds ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+			return a => a != null && (hasUserData(a) || focus.Contains(a.Id));
+		}
+
+		private List<DisputedComponent> BuildDisputesAfterRescan(
+			PersistedMarkup previousMarkup,
+			StitchResult stitch,
+			List<(TreeNode Manual, List<(TreeNode Node, double Dist)> Candidates)> ambiguousManual,
+			HashSet<string> validAnchorIds,
+			HashSet<string> lostAnchorIds,
+			ICollection<string> focusIds = null)
+		{
+			var focus = new HashSet<string>(focusIds ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+			var HasUserData = UserDataPredicate(previousMarkup);
 
 			var now = DateTime.UtcNow;
 			var result = new List<DisputedComponent>();
@@ -67,6 +88,7 @@ namespace MarkupServer
 						_ => DisputeLost,
 					};
 					dp.AppliedFreshId = pt.AppliedFreshId;
+					dp.ProposedAnchorId = pt.ProposedFresh != null && validAnchorIds.Contains(pt.ProposedFresh.Id) ? pt.ProposedFresh.Id : null;
 					dp.Candidates = pt.Candidates
 						.Where(c => c.Fresh != null && validAnchorIds.Contains(c.Fresh.Id))
 						.Select(c => new DisputeCandidate { AnchorId = c.Fresh.Id, Dist = c.Dist })
@@ -74,8 +96,9 @@ namespace MarkupServer
 					return dp;
 				}).ToList();
 
-				// Спрашиваем пользователя, только если под вопросом его данные (принятая точка уже применена уверенно)
-				// или он сам попросил перепривязать эту точку (Update Anchor).
+				// Спрашиваем пользователя, только если под вопросом его данные у непринятой точки или он сам попросил
+				// перепривязать точку (Update Anchor). Сшивка отобрала такие компоненты тем же признаком (AskUserPredicate)
+				// и их уверенные пары не применила; в остальных уверенные пары применены.
 				if (!points.Any(x => x.Status != DisputeAccepted && (x.HasUserData || focus.Contains(x.AnchorId))))
 					continue;
 				result.Add(new DisputedComponent { Id = MakeDisputeId(points), CreatedAtUtc = now, RejectCost = sd.RejectCost, Points = points });
@@ -104,8 +127,8 @@ namespace MarkupServer
 			}
 
 			// Нерешённые компоненты прошлого рескана: кандидаты, которых больше нет, отбрасываются; компонента остаётся,
-			// пока у какой-нибудь её непринятой точки с данными пользователя есть кандидаты. Если точка попала в новую
-			// компоненту, старая снимается — новые расстояния точнее.
+			// пока у какой-нибудь её неприменённой точки (в том числе уверенной пары, ждущей решения) с данными пользователя
+			// есть кандидаты. Если точка попала в новую компоненту, старая снимается — новые расстояния точнее.
 			var freshPointIds = new HashSet<string>(result.SelectMany(d => d.Points).Select(x => x.AnchorId), StringComparer.OrdinalIgnoreCase);
 			foreach (var old in previousMarkup?.Disputes ?? new List<DisputedComponent>())
 			{
@@ -117,7 +140,8 @@ namespace MarkupServer
 					pt.Candidates = (pt.Candidates ?? new List<DisputeCandidate>())
 						.Where(c => !string.IsNullOrWhiteSpace(c?.AnchorId) && validAnchorIds.Contains(c.AnchorId))
 						.ToList();
-				var pending = old.Points.Any(pt => pt.Status != DisputeAccepted && pt.HasUserData && pt.Candidates.Count > 0
+				// применённая уверенная пара старого снимка — живая, в _Lost её нет, поэтому отдельного условия на статус не нужно
+				var pending = old.Points.Any(pt => pt.HasUserData && pt.Candidates.Count > 0
 					&& (pt.IsManual ? validAnchorIds.Contains(pt.AnchorId) : lostAnchorIds.Contains(pt.AnchorId)));
 				if (pending)
 					result.Add(old);
@@ -185,12 +209,13 @@ namespace MarkupServer
 			return root;
 		}
 
-		/// <summary>Id непринятых точек ожидающих компонент — чтобы пометить их в _Lost.</summary>
+		/// <summary>Id неприменённых точек ожидающих компонент (непринятых и уверенных пар, ждущих решения) — чтобы пометить их в _Lost.</summary>
 		private static HashSet<string> PendingDisputedPointIds(PersistedMarkup markup)
 			=> new HashSet<string>(
 				(markup?.Disputes ?? new List<DisputedComponent>())
 					.SelectMany(d => d?.Points ?? new List<DisputedPoint>())
-					.Where(pt => pt != null && pt.Status != DisputeAccepted && !string.IsNullOrWhiteSpace(pt.AnchorId))
+					.Where(pt => pt != null && !string.IsNullOrWhiteSpace(pt.AnchorId)
+						&& (pt.Status != DisputeAccepted || !string.IsNullOrWhiteSpace(pt.ProposedAnchorId)))
 					.Select(pt => pt.AnchorId),
 				StringComparer.OrdinalIgnoreCase);
 
@@ -306,7 +331,11 @@ namespace MarkupServer
 					man = pt.IsManual ? true : null,
 					ud = pt.HasUserData ? true : null,
 					st = pt.Status,
-					auto = pt.Status == DisputeAccepted && candIndex.ContainsKey(pt.AnchorId) ? pt.AnchorId : null,
+					// уверенная пара: место, выбранное решателем, — ждёт решения по компоненте (ProposedAnchorId) или, в снимках
+					// до 2026-09-28, уже применено (узел несёт Id точки)
+					auto = pt.Status != DisputeAccepted ? null
+						: !string.IsNullOrWhiteSpace(pt.ProposedAnchorId) ? (candIndex.ContainsKey(pt.ProposedAnchorId) ? pt.ProposedAnchorId : null)
+						: (candIndex.ContainsKey(pt.AnchorId) ? pt.AnchorId : null),
 				};
 				if (unconditional.Top.Count > 0)
 				{
@@ -592,7 +621,11 @@ namespace MarkupServer
 			}
 			foreach (var d in currentMarkup.Disputes ?? new List<DisputedComponent>())
 				foreach (var pt in d?.Points ?? new List<DisputedPoint>())
+				{
 					Rename(pt.Candidates);
+					if (!string.IsNullOrWhiteSpace(pt.ProposedAnchorId) && renames.TryGetValue(pt.ProposedAnchorId, out var neu))
+						pt.ProposedAnchorId = neu;
+				}
 			foreach (var l in currentMarkup.LostAnchors ?? new List<LostAnchor>())
 				Rename(l?.Candidates);
 		}

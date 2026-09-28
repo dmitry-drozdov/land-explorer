@@ -32,13 +32,18 @@ namespace MarkupServer
 		public bool IsManual { get; set; }
 		/// <summary>Есть данные пользователя: членство в папке, пользовательская связь, комментарий или ручная точка.</summary>
 		public bool HasUserData { get; set; }
-		/// <summary>Решение сервера при рескане: accepted (применено автоматически) | ambiguous | lost.</summary>
+		/// <summary>Решение сервера при рескане: accepted (уверенная пара — прошла правило приёма) | ambiguous | lost.</summary>
 		public string Status { get; set; }
 		/// <summary>
-		/// Только для accepted: Id, который был у нового якоря до того, как сшивка передала ему Id точки.
-		/// Нужен, чтобы отменить передачу, если пользователь выберет для точки другой вариант.
+		/// Только для accepted, если сшивка применила пару (снимки до 2026-09-28): Id, который был у нового якоря до того,
+		/// как сшивка передала ему Id точки. Нужен, чтобы отменить передачу, если пользователь выберет другой вариант.
 		/// </summary>
 		public string AppliedFreshId { get; set; }
+		/// <summary>
+		/// Только для accepted в компоненте, которую видит пользователь: Id нового якоря, который выбрал решатель (уверенная
+		/// пара). Пара не применена — компонента применяется целиком, когда пользователь её подтвердит.
+		/// </summary>
+		public string ProposedAnchorId { get; set; }
 		public List<DisputeCandidate> Candidates { get; set; } = new();
 	}
 

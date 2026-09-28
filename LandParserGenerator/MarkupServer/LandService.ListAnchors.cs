@@ -72,7 +72,9 @@ namespace MarkupServer
 						&& !x.IsManual)
 					.ToList();
 				var freshAutoForStitch = gqlAnchors.Concat(tsAnchors).ToList();
-				stitchResult = StitchAutoAnchorIdsFromPrevious(prevAuto, freshAutoForStitch);
+				// спорные компоненты, которые увидит пользователь, применяются только целиком: их уверенные пары ждут его решения
+				stitchResult = StitchAutoAnchorIdsFromPrevious(prevAuto, freshAutoForStitch,
+					askUser: AskUserPredicate(previousMarkup, focusIds));
 
 				// nodesById был заполнен в BuildSemanticMarkupFromDisk по СТАРЫМ Id
 				// тех же node-объектов; после сшивки Id поменялись на месте,
@@ -90,7 +92,7 @@ namespace MarkupServer
 						lostAutoIds.Add(lostId);
 				}
 
-				Debug($"[stitch] exact={stitchResult.MatchedExact.Count}, fuzzy={stitchResult.MatchedFuzzy.Count}, lost={stitchResult.Lost.Count}, fresh={stitchResult.Fresh.Count} (prevAuto={prevAuto.Count}, freshAuto={freshAutoForStitch.Count})");
+				Debug($"[stitch] exact={stitchResult.MatchedExact.Count}, fuzzy={stitchResult.MatchedFuzzy.Count}, lost={stitchResult.Lost.Count} (held={stitchResult.Held.Count}), fresh={stitchResult.Fresh.Count} (prevAuto={prevAuto.Count}, freshAuto={freshAutoForStitch.Count})");
 				if (stitchResult.MatchedFuzzy.Count > 0)
 				{
 					foreach (var (prevId, replacedId, dist) in stitchResult.MatchedFuzzy)
