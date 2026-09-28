@@ -14,7 +14,7 @@ using VPTree;
 //   knn          — VP-дерево vs полный перебор: точность, время, число вычислений расстояния
 //   pairs        — расстояния (и компоненты) для заданных пар: сверка с Python-портом
 //   determinism  — повторные построения индекса: побайтовая идентичность результата
-//   assign-batch — предпроход точного ключа + k-NN + назначение один-к-одному с отказом (AssignmentRebind), e11/e12/e14; --warmup N — первая пара прогоняется N раз без записи (прогрев JIT);
+//   assign-batch — предпроход точного ключа + k-NN + назначение один-к-одному с отказом (AssignmentRebind), e11/e12/e14; --warmup N — первая пара прогоняется N раз без записи (прогрев JIT); --warmup-all N — весь манифест N раз без записи (прогрев всех путей кода);
 //                  --k 0 — кандидаты по радиусу (все якоря с d ≤ max(reject), VPTree.WithinRadius) вместо k ближайших; --verify-radius N — при --k 0 сверить первые N запросов каждой пары с перебором (e15)
 //
 // Все числа — Invariant culture, seed фиксирован, вход канонизируется CanonicalOrder.Sort.
@@ -571,6 +571,7 @@ static class Program
 		var sw = new Stopwatch();
 		int done = 0;
 		int warmup = GetInt(a, "warmup", 0);   // прогрев JIT: первая пара решается warmup раз без записи
+		int warmupAll = GetInt(a, "warmup-all", 0);   // прогрев всех путей кода: весь манифест проходится warmup-all раз без записи
 		double radius = rejects.Max();          // --k 0: кандидаты — все якоря с d ≤ radius (при нескольких ценах отказа списки полны для каждой)
 		int verifyRadius = GetInt(a, "verify-radius", 0);
 		long verifyChecked = 0, verifyMismatch = 0;
@@ -701,6 +702,11 @@ static class Program
 		}
 		if (warmup > 0 && jobList.Count > 0)
 			for (int wi = 0; wi < warmup; wi++) RunJob(jobList[0], false);
+		// Первая пара манифеста может не дойти до назначения (всё снимает предпроход), и тогда код назначения компилируется JIT
+		// на первой паре, которая до него дошла, — её время завышено в десятки раз (e17: 14,7 мс против 0,08 мс). Полный проход
+		// без записи прогревает все пути кода.
+		for (int wi = 0; wi < warmupAll; wi++)
+			foreach (var job in jobList) RunJob(job, false);
 		foreach (var job in jobList) RunJob(job, true);
 		AppendCsv(outPath, "label,reject,n_index,n_queries,n_exact,n_index_rest,prepass_ms,tree_ms,knn_ms,assign_ms,n_components,max_component,n_enumerated,n_lap,n_accepted,n_ambiguous,n_lost,k,n_cand_total,verify_checked,verify_mismatch", pairRows);
 		if (!string.IsNullOrEmpty(pqPath))
