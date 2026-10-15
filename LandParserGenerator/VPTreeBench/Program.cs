@@ -249,6 +249,21 @@ static class Program
 		_ => NeighborBagKind.Rich,
 	};
 
+	/// Порядок точек, как при сканировании сервера: файлы по возрастанию полного пути (разделитель «\»), внутри файла — по смещению.
+	static List<MethodAnchor> ScanOrder(List<MethodAnchor> anchors) => anchors
+		.OrderBy(x => (x.File ?? "").Replace('/', '\\'), StringComparer.Ordinal).ThenBy(x => x.StartOffset).ToList();
+
+	/// Ключ слоя 1 сервера (LandService.BuildStitchExactKey): язык и вид одинаковы для всех точек стенда, путь — в нижнем регистре с «/»;
+	/// все точки стенда вызываемые (поля GraphQL, функции Go), поэтому сигнатура в ключе есть всегда.
+	static string StitchKey(MethodAnchor x) =>
+		StitchLayer1.Key("", "", (x.File ?? "").Replace('\\', '/').ToLowerInvariant(), x.ParentNameRaw ?? "", x.MethodNameNorm ?? "",
+			AnchorKeys.Signature((x.Args ?? new List<MethodAnchor.Arg>()).Select(y => (y.TypeNorm ?? "", y.NameNorm ?? "")), x.ReturnTypeNorm ?? ""));
+
+	/// Ключ слоя 1б сервера (LandService.BuildStitchGlobalKey): без пути файла, с сигнатурой.
+	static string StitchGlobalKey(MethodAnchor x) =>
+		StitchLayer1.GlobalKey("", "", x.ParentNameRaw ?? "", x.MethodNameNorm ?? "",
+			AnchorKeys.Signature((x.Args ?? new List<MethodAnchor.Arg>()).Select(y => (y.TypeNorm ?? "", y.NameNorm ?? "")), x.ReturnTypeNorm ?? ""));
+
 	static List<MethodAnchor> LoadAnchors(string path)
 	{
 		var txt = File.ReadAllText(path);
@@ -562,7 +577,13 @@ static class Program
 		int k = GetInt(a, "k", 3);
 		double tau = GetDouble(a, "tau", 0.30), margin = GetDouble(a, "margin", 0.30);
 		int enumLimit = GetInt(a, "enum-limit", 10), kBest = GetInt(a, "kbest", 3);
-		bool prepass = GetInt(a, "prepass", 1) != 0;
+		// --prepass 1 (по умолчанию) — ключ AnchorKeys.CanonExact без файла, только единственные совпадения (серии e11–e20);
+		// --prepass server — слой 1 сервера плагина (VPTreeLib.StitchLayer1: ключ с путём файла, ближайшее смещение), порядок
+		// точек как при сканировании сервера, слой 2 с параметрами сервера (k ≥ 2, KBest = 0) — серия e21_server_stitch_mode;
+		// --prepass 0 — без предпрохода
+		var prepassMode = (Get(a, "prepass") ?? "1").Trim().ToLowerInvariant();
+		bool serverMode = prepassMode == "server";
+		bool prepass = prepassMode != "0";
 		var rejects = (Get(a, "reject") ?? "auto").Split(',')
 			.Select(x => x.Trim() == "auto" ? tau / (1.0 - margin) : double.Parse(x, CultureInfo.InvariantCulture)).ToList();
 		var outPath = Get(a, "out"); var pqPath = Get(a, "per-query");
@@ -579,8 +600,8 @@ static class Program
 		void RunJob(JObject job, bool record)
 		{
 			string label = job["label"]?.ToString() ?? "";
-			var index = CanonicalOrder.Sort(LoadAnchors(job["index"]!.ToString()));
-			var queries = LoadAnchors(job["queries"]!.ToString());
+			var index = serverMode ? ScanOrder(LoadAnchors(job["index"]!.ToString())) : CanonicalOrder.Sort(LoadAnchors(job["index"]!.ToString()));
+			var queries = serverMode ? ScanOrder(LoadAnchors(job["queries"]!.ToString())) : LoadAnchors(job["queries"]!.ToString());
 			Dictionary<string, string> gt = null;
 			var gtPath = job["gt"]?.ToString();
 			if (!string.IsNullOrEmpty(gtPath))
@@ -589,11 +610,21 @@ static class Program
 			AnchorsIO.BuildNeighborBags(index, bags, window);
 			AnchorsIO.BuildNeighborBags(queries, bags, window);
 
-			// предпроход точного ключа: как ExactHashRebinder сервера — ключ parent|method|args>return, один-к-одному
+			// предпроход точного ключа. --prepass 1: ключ AnchorKeys.CanonExact (parent|method|args>return) по всей версии, один-к-одному;
+			// так считались e11–e20, это НЕ первый слой сервера (сервер ExactHashRebinder не вызывает, e21). --prepass server: слой 1 сервера
+			// (VPTreeLib.StitchLayer1: путь файла + сигнатура, ближайшее смещение; затем слой 1б без пути, только единственное совпадение)
 			sw.Restart();
 			var exact = new Dictionary<int, int>();      // позиция запроса → позиция в индексе
 			var claimed = new HashSet<int>();
-			if (prepass)
+			if (serverMode)
+			{
+				var m = StitchLayer1.Match(queries.Select(StitchKey).ToList(), queries.Select(x => x.StartOffset).ToList(),
+					index.Select(StitchKey).ToList(), index.Select(x => x.StartOffset).ToList(),
+					queries.Select(StitchGlobalKey).ToList(), index.Select(StitchGlobalKey).ToList());
+				for (int q = 0; q < m.Length; q++)
+					if (m[q] >= 0) { exact[q] = m[q]; claimed.Add(m[q]); }
+			}
+			else if (prepass)
 			{
 				var byKeyIndex = new Dictionary<string, List<int>>(StringComparer.Ordinal);
 				for (int i = 0; i < index.Count; i++)
@@ -629,11 +660,14 @@ static class Program
 			var pts = new List<AssignmentRebind.Point>();
 			var topk = new Dictionary<int, List<VPTree<MethodAnchor>.KNNResult>>();
 			sw.Restart();
-			for (int q = 0; q < queries.Count; q++)
+			// сервер обходит несопоставленные старые точки по возрастанию Id и запрашивает не меньше двух соседей
+			var layer2Order = Enumerable.Range(0, queries.Count).Where(q => !exact.ContainsKey(q)).ToList();
+			if (serverMode) layer2Order = layer2Order.OrderBy(q => queries[q].Id ?? "", StringComparer.Ordinal).ToList();
+			int kQuery = serverMode ? Math.Max(2, k) : k;
+			foreach (int q in layer2Order)
 			{
-				if (exact.ContainsKey(q)) continue;
 				var knn = tree == null ? new List<VPTree<MethodAnchor>.KNNResult>()
-						: (k > 0 ? tree.KNearest(queries[q], k) : tree.WithinRadius(queries[q], radius));
+						: (kQuery > 0 ? tree.KNearest(queries[q], kQuery) : tree.WithinRadius(queries[q], radius));
 				topk[q] = knn;
 				var pt = new AssignmentRebind.Point { Index = q };
 				foreach (var r in knn) pt.Candidates.Add(new AssignmentRebind.Candidate(r.Index, r.Dist));
@@ -658,7 +692,7 @@ static class Program
 
 			foreach (double reject in rejects)
 			{
-				var opt = new AssignmentRebind.Options { Tau = tau, Margin = margin, RejectCost = reject, EnumerateLimit = enumLimit, KBest = kBest };
+				var opt = new AssignmentRebind.Options { Tau = tau, Margin = margin, RejectCost = reject, EnumerateLimit = enumLimit, KBest = serverMode ? 0 : kBest };
 				sw.Restart();
 				var result = AssignmentRebind.Solve(pts, opt);
 				sw.Stop();

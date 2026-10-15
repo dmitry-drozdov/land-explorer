@@ -27,6 +27,18 @@ namespace VPTree
 			return sb.ToString();
 		}
 
+		/// <summary>Сигнатура в том же виде, что хвост <see cref="CanonExact"/>: «type#name;…>returns».
+		/// Входит в ключ слоя 1 сервера для вызываемых элементов (<see cref="StitchLayer1"/>; решение 2026-10-15, e21).</summary>
+		public static string Signature(IEnumerable<(string TypeNorm, string NameNorm)> args, string returnTypeNorm)
+		{
+			var sb = new StringBuilder(128);
+			if (args != null)
+				foreach (var (t, n) in args)
+					sb.Append(t).Append('#').Append(n).Append(';');
+			sb.Append(">").Append(returnTypeNorm);
+			return sb.ToString();
+		}
+
 		// 64-битный FNV-1a по UTF-16 младшему байту (дешево и быстро)
 		public static ulong Fnv1a64(string s)
 		{

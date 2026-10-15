@@ -1561,9 +1561,13 @@ namespace MarkupServer
 		}
 
 		private void BuildSemanticMarkupFromDisk(out List<TreeNode> gqlAnchors, out List<TreeNode> tsAnchors)
+			=> BuildSemanticMarkupFromDisk(out gqlAnchors, out tsAnchors, out _);
+
+		private void BuildSemanticMarkupFromDisk(out List<TreeNode> gqlAnchors, out List<TreeNode> tsAnchors, out List<TreeNode> goAnchors)
 		{
 			gqlAnchors = new List<TreeNode>();
 			tsAnchors = new List<TreeNode>();
+			goAnchors = new List<TreeNode>();
 
 			StartScanTimings();
 			nodesById.Clear();
@@ -1610,6 +1614,17 @@ namespace MarkupServer
 				_swBags.Start();
 				AssignNeighborBags(tsAnchors);
 				_swBags.Stop();
+			}
+
+			// Go — только если сервер инициализирован с грамматикой Go (LandService.Go.cs)
+			if (goParser != null)
+			{
+				var goFiles = GetAllFiles(currentFolderPath, "go")
+					.Where(x => x.EndsWith(".go", StringComparison.OrdinalIgnoreCase))
+					.OrderBy(x => x, StringComparer.Ordinal)
+					.ToList();
+				using (var scope = Tracing.Tracer.BuildSpan("ProcessGoFiles").StartActive())
+					ParseGoFiles(goFiles, goAnchors);
 			}
 			FinishScanTimings();
 		}
@@ -1743,7 +1758,25 @@ namespace MarkupServer
 			if (string.IsNullOrEmpty(lang) || string.IsNullOrEmpty(kind))
 				return null;
 
-			return $"{lang}|{kind}|{pathNorm}|{parentRaw}|{method}";
+			// у вызываемых элементов в ключ входит сигнатура: иначе поля, обменявшиеся именами, перепривязывались по имени (e21)
+			var family = string.IsNullOrWhiteSpace(auto.AnchorFamily) ? InferAnchorFamilyFromKind(auto.AnchorKind) : auto.AnchorFamily;
+			var signature = string.Equals(family, AnchorFamilyCallable, StringComparison.OrdinalIgnoreCase)
+				? AnchorKeys.Signature((auto.Args ?? new List<Arg>()).Select(x => (x.TypeNorm ?? "", x.NameNorm ?? "")), auto.ReturnTypeNorm ?? "")
+				: null;
+			return StitchLayer1.Key(lang, kind, pathNorm, parentRaw, method, signature);
+		}
+
+		/// <summary>Ключ слоя 1б (без пути файла) — только у вызываемых элементов; у остальных null (StitchLayer1.GlobalKey).</summary>
+		private static string BuildStitchGlobalKey(TreeNode auto)
+		{
+			if (auto == null || !string.Equals(auto.NodeType, "anchor", StringComparison.OrdinalIgnoreCase)) return null;
+			var lang = (auto.Language ?? string.Empty).Trim().ToLowerInvariant();
+			var kind = (auto.AnchorKind ?? string.Empty).Trim();
+			if (string.IsNullOrEmpty(lang) || string.IsNullOrEmpty(kind)) return null;
+			var family = string.IsNullOrWhiteSpace(auto.AnchorFamily) ? InferAnchorFamilyFromKind(auto.AnchorKind) : auto.AnchorFamily;
+			if (!string.Equals(family, AnchorFamilyCallable, StringComparison.OrdinalIgnoreCase)) return null;
+			var signature = AnchorKeys.Signature((auto.Args ?? new List<Arg>()).Select(x => (x.TypeNorm ?? "", x.NameNorm ?? "")), auto.ReturnTypeNorm ?? "");
+			return StitchLayer1.GlobalKey(lang, kind, auto.ParentNameRaw ?? string.Empty, auto.MethodNameNorm ?? string.Empty, signature);
 		}
 
 		/// <summary>
@@ -1796,48 +1829,23 @@ namespace MarkupServer
 			// используем object identity, а не Id (Id меняется на месте).
 			var claimedFresh = new HashSet<TreeNode>();
 
-			// ---- Слой 1: точное совпадение ключа ----
-			var freshByKey = new Dictionary<string, List<TreeNode>>(StringComparer.Ordinal);
-			foreach (var f in freshList)
-			{
-				var key = BuildStitchExactKey(f);
-				if (key == null) continue;
-				if (!freshByKey.TryGetValue(key, out var bucket))
-					freshByKey[key] = bucket = new List<TreeNode>();
-				bucket.Add(f);
-			}
+			// ---- Слой 1: точное совпадение ключа (общий код со стендом: VPTreeLib.StitchLayer1) ----
+			var layer1 = StitchLayer1.Match(
+				prevList.Select(BuildStitchExactKey).ToList(), prevList.Select(p => p.StartOffset ?? 0).ToList(),
+				freshList.Select(BuildStitchExactKey).ToList(), freshList.Select(f => f.StartOffset ?? 0).ToList(),
+				prevList.Select(BuildStitchGlobalKey).ToList(), freshList.Select(BuildStitchGlobalKey).ToList());
 
 			var unclaimedPrev = new List<TreeNode>();
-			foreach (var p in prevList)
+			for (var pi = 0; pi < prevList.Count; pi++)
 			{
-				var key = BuildStitchExactKey(p);
-				if (key == null || !freshByKey.TryGetValue(key, out var candidates) || candidates.Count == 0)
+				var p = prevList[pi];
+				if (layer1[pi] < 0)
 				{
 					unclaimedPrev.Add(p);
 					continue;
 				}
 
-				TreeNode chosen = null;
-				var bestOffsetDelta = int.MaxValue;
-				foreach (var c in candidates)
-				{
-					if (claimedFresh.Contains(c)) continue;
-					var pStart = p.StartOffset ?? 0;
-					var cStart = c.StartOffset ?? 0;
-					var delta = Math.Abs(pStart - cStart);
-					if (delta < bestOffsetDelta)
-					{
-						bestOffsetDelta = delta;
-						chosen = c;
-					}
-				}
-
-				if (chosen == null)
-				{
-					unclaimedPrev.Add(p);
-					continue;
-				}
-
+				var chosen = freshList[layer1[pi]];
 				var replacedId = chosen.Id;
 				chosen.Id = p.Id;
 				// Перенос пользовательского комментария на новый якорь:

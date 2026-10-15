@@ -56,7 +56,7 @@ namespace MarkupServer
 			AnchorStore.TryLoad(currentFolderPath, out var previousMarkup, out var previousErr);
 			var suppressed = GetSuppressedKeysSet(previousMarkup);
 
-			BuildSemanticMarkupFromDisk(out var gqlAnchors, out var tsAnchors);
+			BuildSemanticMarkupFromDisk(out var gqlAnchors, out var tsAnchors, out var goAnchors);
 
 			// Сшивка Id у auto-якорей с предыдущим snapshot-ом, чтобы Id переживал
 			// рескан при отсутствии семантических изменений. Это нужно для будущих
@@ -71,7 +71,7 @@ namespace MarkupServer
 						&& string.Equals(x.NodeType, "anchor", StringComparison.OrdinalIgnoreCase)
 						&& !x.IsManual)
 					.ToList();
-				var freshAutoForStitch = gqlAnchors.Concat(tsAnchors).ToList();
+				var freshAutoForStitch = gqlAnchors.Concat(tsAnchors).Concat(goAnchors).ToList();
 				// спорные компоненты, которые увидит пользователь, применяются только целиком: их уверенные пары ждут его решения
 				stitchResult = StitchAutoAnchorIdsFromPrevious(prevAuto, freshAutoForStitch,
 					askUser: AskUserPredicate(previousMarkup, focusIds));
@@ -100,7 +100,7 @@ namespace MarkupServer
 				}
 			}
 
-			var autoAnchors = gqlAnchors.Select(CloneAnchor).Concat(tsAnchors.Select(CloneAnchor))
+			var autoAnchors = gqlAnchors.Select(CloneAnchor).Concat(tsAnchors.Select(CloneAnchor)).Concat(goAnchors.Select(CloneAnchor))
 				.Where(x => !IsSuppressed(x, suppressed))
 				.ToList();
 

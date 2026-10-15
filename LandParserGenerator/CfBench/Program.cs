@@ -14,6 +14,8 @@
 //
 // usage: CfBench --grammar graphql.land --jobs jobs.json --out pairs.csv --per-query pq.csv [--single-core | --core N] [--no-heuristic] [--only label]
 //        [--save-markup DIR --markup-csv markup.csv [--markup-only] [--markup-parents Query,Mutation]]  (объём хранения, e13)
+//        [--ext go --point-types func]  (другой язык: расширение файлов и символы грамматики, чьи точки оцениваются;
+//        по умолчанию graphql и type_line,func_line; Go — e20_go_real_history, грамматика golang_markup.land)
 // =====================================================================================
 using System;
 using System.Collections.Concurrent;
@@ -37,7 +39,8 @@ namespace CfBench
 {
 	static class Program
 	{
-		static readonly HashSet<string> FieldTypes = new HashSet<string> { "type_line", "func_line" };
+		static HashSet<string> FieldTypes = new HashSet<string> { "type_line", "func_line" };
+		static string FileExt = "graphql";
 		static bool NoHeuristic;
 		// --save-markup DIR: после создания точек сохранить файл разметки панели (MarkupManager.Serialize, как команда
 		// «сохранить» в Land.Control) — для сравнения объёма хранения с индексом VP-дерева (markup/experiments/e13_storage_size);
@@ -66,6 +69,10 @@ namespace CfBench
 			else if (a.ContainsKey("single-core"))
 				Process.GetCurrentProcess().ProcessorAffinity = (IntPtr)1;
 			NoHeuristic = a.ContainsKey("no-heuristic");
+			if (a.ContainsKey("ext"))
+				FileExt = a["ext"].TrimStart('.');
+			if (a.ContainsKey("point-types"))
+				FieldTypes = new HashSet<string>(a["point-types"].Split(',').Select(x => x.Trim()).Where(x => x.Length > 0), StringComparer.Ordinal);
 			SaveMarkupDir = a.ContainsKey("save-markup") ? Path.GetFullPath(a["save-markup"]) : null;
 			MarkupOnly = a.ContainsKey("markup-only");
 			MarkupParents = a.ContainsKey("markup-parents")
@@ -300,7 +307,7 @@ namespace CfBench
 
 		static List<ParsedFile> ParseDir(BaseParser parser, string dir)
 		{
-			var files = Directory.GetFiles(dir, "*.graphql", SearchOption.AllDirectories)
+			var files = Directory.GetFiles(dir, "*." + FileExt, SearchOption.AllDirectories)
 				.OrderBy(p => p, StringComparer.Ordinal).ToList();
 			var res = new List<ParsedFile>();
 			foreach (var path in files)

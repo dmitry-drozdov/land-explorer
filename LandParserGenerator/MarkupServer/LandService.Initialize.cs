@@ -68,6 +68,8 @@ namespace MarkupServer
 				else
 					Debug("Parser TS Generated");
 
+				InitGoParser(p.goParserPath);
+
 				return Task.FromResult(new InitializeResult
 				{
 					serverVersion = "1.0.0",

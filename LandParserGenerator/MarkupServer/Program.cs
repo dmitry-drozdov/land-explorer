@@ -215,6 +215,8 @@ namespace MarkupServer
 		public string offsetEncoding { get; set; }
 		public string graphqlParserPath { get; set; }
 		public string typescriptParserPath { get; set; }
+		/// <summary>Грамматика Go (golang_markup.land); без неё файлы Go не сканируются (плагин её не передаёт).</summary>
+		public string goParserPath { get; set; }
 	}
 	public class InitializeResult
 	{

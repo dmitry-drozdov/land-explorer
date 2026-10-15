@@ -27,7 +27,8 @@ namespace MarkupServer
 		private static string InferAnchorFamilyFromKind(string anchorKind)
 		{
 			if (string.Equals(anchorKind, AnchorKindGqlField, StringComparison.OrdinalIgnoreCase)
-				|| string.Equals(anchorKind, AnchorKindTs, StringComparison.OrdinalIgnoreCase))
+				|| string.Equals(anchorKind, AnchorKindTs, StringComparison.OrdinalIgnoreCase)
+				|| string.Equals(anchorKind, AnchorKindGoFunc, StringComparison.OrdinalIgnoreCase))
 				return AnchorFamilyCallable;
 
 			if (string.Equals(anchorKind, AnchorKindGqlType, StringComparison.OrdinalIgnoreCase)
@@ -279,6 +280,12 @@ namespace MarkupServer
 				.ToList();
 			if (tsAnchors.Count > 0)
 				AssignNeighborBags(tsAnchors);
+
+			var goAnchors = list
+				.Where(x => string.Equals(x.Language, LangGo, StringComparison.OrdinalIgnoreCase))
+				.ToList();
+			if (goAnchors.Count > 0)
+				AssignNeighborBags(goAnchors);
 		}
 
 		/// <summary>

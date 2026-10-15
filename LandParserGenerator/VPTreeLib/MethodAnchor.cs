@@ -23,6 +23,11 @@ namespace VPTree
 		/// <summary>Файл (относительный путь), из которого извлечён якорь. Не участвует в метрике;
 		/// нужен для группировки соседей в пределах одного файла и для канонического порядка.</summary>
 		public string File { get; set; }
+		/// <summary>Исходное (не нормализованное) имя родителя. Не участвует в метрике; входит в ключ слоя 1 сервера
+		/// (<see cref="StitchLayer1"/>), который стенд воспроизводит в режиме --prepass server.</summary>
+		public string ParentNameRaw { get; set; }
+		/// <summary>Читается из JSON, но не сохраняется (AnchorsIO.SaveJson): замеры объёма e13/e20 остаются воспроизводимыми.</summary>
+		public bool ShouldSerializeParentNameRaw() => false;
 
 		public sealed class Arg
 		{
