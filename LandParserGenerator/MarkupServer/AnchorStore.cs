@@ -327,6 +327,7 @@ namespace MarkupServer
 				Args = n.Args?.Select(x => new Arg { TypeNorm = x.TypeNorm, NameNorm = x.NameNorm }).ToList(),
 				OrdinalInParent = n.OrdinalInParent,
 				NeighborBag = n.NeighborBag != null ? new Dictionary<string, double>(n.NeighborBag, StringComparer.Ordinal) : null,
+				BodySig = n.BodySig,
 			};
 		}
 	}

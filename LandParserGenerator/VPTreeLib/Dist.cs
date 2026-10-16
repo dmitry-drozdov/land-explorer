@@ -26,6 +26,9 @@ namespace VPTree
 			public double ReturnsW = 0.20;
 			public double ParentW  = 0.15;
 			public double NeighW   = 0.35;
+			/// <summary>Вес отпечатка тела (<see cref="BodySignature"/>, e24). По умолчанию 0: метрика GraphQL и прежних серий
+			/// не меняется; для Go задаётся шестым числом --weights.</summary>
+			public double BodyW    = 0.0;
 
 			public int NameScale     = 8;
 			public int TypeScale     = 16;
@@ -833,6 +836,8 @@ namespace VPTree
 			     + w.ReturnsW * dRet
 			     + w.ParentW * dRecv
 			     + w.NeighW * dNeigh;
+			if (w.BodyW > 0)
+				total += w.BodyW * BodySignature.Distance(a?.BodySig, b?.BodySig);
 		}
 
 
@@ -854,6 +859,9 @@ namespace VPTree
 			     + w.ReturnsW * dRet
 			     + w.ParentW * dRecv
 			     + w.NeighW * dNeigh;
+			// шестая компонента — отпечаток тела (e24); метрика с постоянным весом, сумма метрик остаётся метрикой
+			if (w.BodyW > 0)
+				total += w.BodyW * BodySignature.Distance(a?.BodySig, b?.BodySig);
 
 			AnchorStats.RecordSample(dName, dArgs, dRet, dRecv, dNeigh, total, w);
 

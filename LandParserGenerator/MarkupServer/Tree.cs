@@ -37,6 +37,10 @@ namespace MarkupServer
 		public List<Arg> Args { get; set; }
 		public int? OrdinalInParent { get; set; }
 		public Dictionary<string, double> NeighborBag { get; set; }
+		/// <summary>Отпечаток тела функции Go (VPTree.BodySignature, 64 байта; в файле разметки — base64), e24. Хранится, как
+		/// нечёткий хеш внутреннего контекста у исходного алгоритма: при перепривязке старого текста функции уже нет.
+		/// У точек GraphQL и TypeScript — null (в файл не пишется).</summary>
+		public byte[] BodySig { get; set; }
 
 		// Только для shadow-узлов внутри user-групп: исходный AnchorId, на который ссылается тень.
 		// Не сериализуется в snapshot — заполняется только в материализованных Roots.

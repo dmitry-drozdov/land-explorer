@@ -262,7 +262,7 @@ static class Program
 		var args = new JArray();
 		foreach (var ar in (n["Args"] as JArray ?? new JArray()).OfType<JObject>())
 			args.Add(new JObject { ["TypeNorm"] = ar["TypeNorm"]?.ToString() ?? "", ["NameNorm"] = ar["NameNorm"]?.ToString() ?? "" });
-		return new JObject
+		var rec = new JObject
 		{
 			["Id"] = receiver.Length > 0 ? $"{file}::{receiver}.{nameRaw}#{counters[ck]}" : $"{file}::{nameRaw}#{counters[ck]}",
 			["File"] = file,
@@ -278,6 +278,10 @@ static class Program
 			["StartOffset"] = n["StartOffset"]?.Type == JTokenType.Integer ? (int)n["StartOffset"] : 0,
 			["EndOffset"] = n["EndOffset"]?.Type == JTokenType.Integer ? (int)n["EndOffset"] : 0,
 		};
+		// отпечаток тела (e24) — только если сервер его записал; прежние выгрузки не меняются
+		if (n["BodySig"] is JValue sig && sig.Type == JTokenType.String)
+			rec["BodySig"] = sig.ToString();
+		return rec;
 	}
 
 	static string Median(List<double> xs)

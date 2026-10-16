@@ -28,6 +28,10 @@ namespace VPTree
 		public string ParentNameRaw { get; set; }
 		/// <summary>Читается из JSON, но не сохраняется (AnchorsIO.SaveJson): замеры объёма e13/e20 остаются воспроизводимыми.</summary>
 		public bool ShouldSerializeParentNameRaw() => false;
+		/// <summary>Отпечаток тела функции (<see cref="BodySignature"/>, 64 байта; в JSON — base64): шестая компонента метрики,
+		/// e24. У полей GraphQL и у точек без тела — null; при записи null не сохраняется, объём прежних замеров не меняется.</summary>
+		public byte[]? BodySig { get; set; }
+		public bool ShouldSerializeBodySig() => BodySig != null;
 
 		public sealed class Arg
 		{

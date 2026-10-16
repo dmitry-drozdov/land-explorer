@@ -236,8 +236,9 @@ static class Program
 		if (!string.IsNullOrEmpty(ws))
 		{
 			var p = ws.Split(',').Select(x => double.Parse(x, CultureInfo.InvariantCulture)).ToArray();
-			if (p.Length != 5) throw new ArgumentException("--weights expects 5 numbers");
+			if (p.Length != 5 && p.Length != 6) throw new ArgumentException("--weights expects 5 numbers (6 with the body, e24)");
 			w.NameW = p[0]; w.ArgsW = p[1]; w.ReturnsW = p[2]; w.ParentW = p[3]; w.NeighW = p[4];
+			if (p.Length == 6) w.BodyW = p[5];
 		}
 		return w;
 	}
@@ -316,7 +317,7 @@ static class Program
 			Id = a.Id, StartOffset = a.StartOffset, EndOffset = a.EndOffset, File = a.File,
 			MethodNameNorm = a.MethodNameNorm, ParentNameNorm = a.ParentNameNorm, ReturnTypeNorm = a.ReturnTypeNorm,
 			Args = (a.Args ?? new List<MethodAnchor.Arg>()).Select(x => new MethodAnchor.Arg { TypeNorm = x.TypeNorm, NameNorm = x.NameNorm }).ToList(),
-			OrdinalInParent = a.OrdinalInParent, NeighborBag = a.NeighborBag,
+			OrdinalInParent = a.OrdinalInParent, NeighborBag = a.NeighborBag, BodySig = a.BodySig,
 		};
 		mutate?.Invoke(q);
 		return q;
@@ -391,9 +392,31 @@ static class Program
 			compViol[kv.Key] = v;
 		}
 
-		var header = "impl,mode,bags,n_anchors,structured_n,structured_viol,random_n,random_viol,random_asym,random_out_of_range,arity_n,arity_viol,comp_Name_viol,comp_Args_viol,comp_Returns_viol,comp_Parent_viol,comp_Neigh_viol";
+		// 5) отпечаток тела (e24): компонента тела отдельно и полная метрика с её весом на «близких» тройках — q отличается от p
+		// в нескольких значениях отпечатка, r от q ещё в нескольких; с вероятностью 0,1 у каждой точки тела нет (null)
+		var withBody = anchors.Where(x => x.BodySig != null).ToList();
+		int n5 = withBody.Count > 0 ? Math.Min(triples, 50000) : 0, v5body = 0, v5full = 0;
+		var bodyOnly = new Dist.Weights { NameW = 0, ArgsW = 0, ReturnsW = 0, ParentW = 0, NeighW = 0, BodyW = 1, ArgsNorm = w.ArgsNorm, ArgMaxCount = w.ArgMaxCount };
+		var r5 = new Random(seed + 2);
+		byte[]? Perturb(byte[]? sig)
+		{
+			if (sig == null || r5.NextDouble() < 0.1) return r5.NextDouble() < 0.5 ? null : sig;
+			var c = (byte[])sig.Clone();
+			for (int k = r5.Next(0, 9); k > 0; k--) { var s = r5.Next(BodySignature.Slots); c[2 * s] ^= (byte)(1 + r5.Next(255)); }
+			return c;
+		}
+		for (int t = 0; t < n5; t++)
+		{
+			var p = withBody[r5.Next(withBody.Count)];
+			var q = CloneWith(p, m => m.BodySig = Perturb(p.BodySig));
+			var r = CloneWith(r5.NextDouble() < 0.5 ? p : withBody[r5.Next(withBody.Count)], m => m.BodySig = Perturb(q.BodySig));
+			if (V(Dist.AnchorDistance(p, q, bodyOnly), Dist.AnchorDistance(q, r, bodyOnly), Dist.AnchorDistance(p, r, bodyOnly))) v5body++;
+			if (V(Dist.AnchorDistance(p, q, w), Dist.AnchorDistance(q, r, w), Dist.AnchorDistance(p, r, w))) v5full++;
+		}
+
+		var header = "impl,mode,bags,n_anchors,structured_n,structured_viol,random_n,random_viol,random_asym,random_out_of_range,arity_n,arity_viol,comp_Name_viol,comp_Args_viol,comp_Returns_viol,comp_Parent_viol,comp_Neigh_viol,body_w,body_n,comp_Body_viol,body_full_viol";
 		var row = Csv("csharp", Get(a, "mode", "constant"), Get(a, "bags", "rich"), anchors.Count, n1, v1, triples, v2, asym, range, n3, v3,
-			compViol["Name"], compViol["Args"], compViol["Returns"], compViol["Parent"], compViol["Neigh"]);
+			compViol["Name"], compViol["Args"], compViol["Returns"], compViol["Parent"], compViol["Neigh"], w.BodyW, n5, v5body, v5full);
 		AppendCsv(Get(a, "out"), header, new[] { row });
 		Console.Error.WriteLine(row);
 		return 0;

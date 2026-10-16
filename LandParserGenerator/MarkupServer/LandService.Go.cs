@@ -27,6 +27,10 @@ namespace MarkupServer
 
 		private BaseParser goParser;
 
+		/// <summary>Отпечаток тела функции (e24) считается и пишется в файл разметки, только если LAND_GO_BODYSIG=1: по решению
+		/// пользователя 2026-10-16 тело не используется ни одним алгоритмом, файл разметки Go остаётся прежним; стенды e24 включают.</summary>
+		private static readonly bool GoBodySigEnabled = Environment.GetEnvironmentVariable("LAND_GO_BODYSIG") == "1";
+
 		private void InitGoParser(string grammarPath)
 		{
 			if (string.IsNullOrWhiteSpace(grammarPath))
@@ -117,6 +121,7 @@ namespace MarkupServer
 						ParentNameRaw = parentRaw,
 						ReturnTypeNorm = NormalizeReturnTypes(f.Returns),
 						Args = NormalizeArgs(f.Args),
+						BodySig = GoBodySigEnabled ? VPTree.BodySignature.Compute(GoBodyText(f.Node, txt)) : null,
 					});
 				}
 
@@ -290,6 +295,23 @@ namespace MarkupServer
 			for (; square > 0; square--) sb.Append(']');
 			for (; round > 0; round--) sb.Append(')');
 			return sb.ToString();
+		}
+
+		/// <summary>Текст тела функции между фигурными скобками (последние листья «{» Any «}» узла func);
+		/// null у объявления без тела.</summary>
+		private static string GoBodyText(Node fn, string text)
+		{
+			var ch = (fn.Children ?? new List<Node>()).Where(c => c.Location != null).ToList();
+			if (ch.Count < 2 || Slice(ch[ch.Count - 1], text) != "}") return null;
+			for (var i = ch.Count - 2; i >= 0; i--)
+			{
+				if (Slice(ch[i], text) != "{") continue;
+				var starts = CodePointStarts(text);
+				var from = CpToUtf16(starts, ch[i].Location.End.Offset + 1);
+				var to = Math.Min(text.Length, CpToUtf16(starts, ch[ch.Count - 1].Location.Start.Offset));
+				return to > from ? text.Substring(from, to - from) : "";
+			}
+			return null;
 		}
 
 		private static string SliceRange(Node from, Node to, string text)
