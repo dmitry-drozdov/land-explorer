@@ -1,4 +1,4 @@
-// =====================================================================================
+﻿// =====================================================================================
 // CfBench — стенд для ОРИГИНАЛЬНОГО алгоритма перепривязки Головешкина (Land.Markup.Binding.ContextFinder)
 // на парах версий GraphQL-схем корпуса реальной истории (markup/experiments/e03_real_history_corpus).
 //
@@ -158,7 +158,9 @@ namespace CfBench
 			double msAddLand = sw.Elapsed.TotalMilliseconds;
 
 			var allPoints = mm.GetConcernPoints();
-			if (SaveMarkupDir != null)
+			// --markup-only: файл разметки сохраняется сразу; в обычном прогоне — в конце пары, после замеренных этапов
+			// (поиск разметку не меняет, файл тот же; запись не попадает во время поиска) — e22: один прогон вместо двух
+			if (SaveMarkupDir != null && MarkupOnly)
 				SaveMarkup(mm, label, oldIds, msAddLand);
 			if (MarkupOnly)
 			{
@@ -231,6 +233,8 @@ namespace CfBench
 			}
 			pairRows.Add(Csv(label, oldFiles.Count, newFiles.Count, points.Count, pointId.Count, autoLocal.Count, nAutoTotal,
 				msParseOld, msParseNew, msAddLand, msLocal, msGlobal, msLocal + msGlobal, ""));
+			if (SaveMarkupDir != null)
+				SaveMarkup(mm, label, oldIds, msAddLand);
 			Console.Error.WriteLine($"[cfbench] {label}: points={points.Count} (ids {pointId.Count}) auto={nAutoTotal} addland={msAddLand:F0}ms local={msLocal:F0}ms global={msGlobal:F0}ms");
 		}
 
@@ -282,19 +286,25 @@ namespace CfBench
 			bool parents = MarkupParents != null;
 			var all = mm.GetConcernPoints();
 			int nCtxAll = mm.GetPointContexts().Count;
-			var pathAll = Path.Combine(SaveMarkupDir, label + (parents ? ".parents.json" : ".all.json"));
+			var fileLabel = label.Replace("|", "__");   // метка пары «repo|sha» — «|» недопустим в имени файла Windows
+			var pathAll = Path.Combine(SaveMarkupDir, fileLabel + (parents ? ".parents.json" : ".all.json"));
 			var sw = Stopwatch.StartNew();
 			mm.Serialize(pathAll, false);
 			double msSerAll = sw.Elapsed.TotalMilliseconds;
 			long bytesAll = new FileInfo(pathAll).Length;
 			int nAnchored = all.Count(p => oldIds.ContainsKey((p.Context.FileName, p.Context.StartOffset)));
 			string pathFields = ""; long bytesFields = -1; int nCtxFields = -1; double msSerFields = double.NaN;
-			if (!parents)
+			if (!parents && nAnchored == all.Count)
+			{
+				// все точки имеют якорь (Go: каждая функция — точка): файл «поля» совпал бы с файлом «всё» — не пишем дважды
+				nCtxFields = nCtxAll; pathFields = pathAll; bytesFields = bytesAll; msSerFields = 0;
+			}
+			else if (!parents)
 			{
 				foreach (var p in all.Where(p => !oldIds.ContainsKey((p.Context.FileName, p.Context.StartOffset))).ToList())
 					mm.RemoveElement(p);
 				nCtxFields = mm.GetPointContexts().Count;
-				pathFields = Path.Combine(SaveMarkupDir, label + ".fields.json");
+				pathFields = Path.Combine(SaveMarkupDir, fileLabel + ".fields.json");
 				sw.Restart();
 				mm.Serialize(pathFields, false);
 				msSerFields = sw.Elapsed.TotalMilliseconds;
