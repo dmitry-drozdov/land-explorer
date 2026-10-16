@@ -46,6 +46,9 @@
     <!-- все зависимости Land.Markup рядом с exe -->
     <None Include="..\Land.Markup\bin\CfBench\*.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" />
     <None Include="..\Land.Markup\bin\CfBench\*.config" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+    <!-- нативный TLSH автора (2021, C++/CLI, x64) для FuzzyHashing.AuthorTlsh (флаг fuzzy author); в подпапке, так как
+         управляемая Tlsh.net тоже называется tlsh.dll -->
+    <None Include="..\components\TLSH\tlsh.dll" Link="author_tlsh\tlsh.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" />
   </ItemGroup>
 
 </Project>

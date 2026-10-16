@@ -16,6 +16,8 @@
 //        [--save-markup DIR --markup-csv markup.csv [--markup-only] [--markup-parents Query,Mutation]]  (объём хранения, e13)
 //        [--ext go --point-types func]  (другой язык: расширение файлов и символы грамматики, чьи точки оцениваются;
 //        по умолчанию graphql и type_line,func_line; Go — e20_go_real_history, грамматика golang_markup.land)
+//        [--fuzzy author|legacy]  (нечёткий хеш внутреннего контекста: author — нативный TLSH автора и totalDiff, как в 2021;
+//        legacy, по умолчанию, — замена 2025 года на Tlsh.net; e23_go_body_context)
 // =====================================================================================
 using System;
 using System.Collections.Concurrent;
@@ -69,6 +71,17 @@ namespace CfBench
 			else if (a.ContainsKey("single-core"))
 				Process.GetCurrentProcess().ProcessorAffinity = (IntPtr)1;
 			NoHeuristic = a.ContainsKey("no-heuristic");
+			// --fuzzy author: нечёткий хеш и расстояние автора (нативный TLSH, totalDiff); по умолчанию — замена 2025 года
+			if (a.ContainsKey("fuzzy"))
+			{
+				if (a["fuzzy"] != "author" && a["fuzzy"] != "legacy")
+				{
+					Console.Error.WriteLine("--fuzzy: author | legacy");
+					return 2;
+				}
+				FuzzyHashing.AuthorTlsh = a["fuzzy"] == "author";
+			}
+			Console.Error.WriteLine("fuzzy hash: " + (FuzzyHashing.AuthorTlsh ? "author (native TLSH, totalDiff)" : "legacy (Tlsh.net, byte mismatches)"));
 			if (a.ContainsKey("ext"))
 				FileExt = a["ext"].TrimStart('.');
 			if (a.ContainsKey("point-types"))
