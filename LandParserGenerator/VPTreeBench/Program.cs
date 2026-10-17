@@ -158,7 +158,7 @@ static class Program
 			{
 				Id = x.Id, StartOffset = x.StartOffset, EndOffset = x.EndOffset, MethodNameNorm = x.MethodNameNorm,
 				ParentNameNorm = x.ParentNameNorm, ReturnTypeNorm = x.ReturnTypeNorm, Args = x.Args, OrdinalInParent = x.OrdinalInParent,
-				File = x.File, NeighborBag = null,
+				File = x.File, NeighborBag = null, BodySig = x.BodySig,   // отпечаток тела (e24–e25) хранится в файле разметки; у прежних серий null
 			}).ToList();
 			var nobagsPath = Path.Combine(outDir, "anchors_nobags.json");
 			AnchorsIO.SaveJson(nobagsPath, stripped);
@@ -609,6 +609,22 @@ static class Program
 		bool prepass = prepassMode != "0";
 		var rejects = (Get(a, "reject") ?? "auto").Split(',')
 			.Select(x => x.Trim() == "auto" ? tau / (1.0 - margin) : double.Parse(x, CultureInfo.InvariantCulture)).ToList();
+		// --thresholds "τ:m,τ:m,…" (e25): несколько пар порогов за один прогон — соседи ищутся один раз, назначение решается для каждой
+		// пары с ценой отказа τ/(1 − m); в столбце reject выводится «τ:m». Без опции — прежнее поведение (--tau, --margin, --reject).
+		var thrSpec = Get(a, "thresholds");
+		var thresholds = string.IsNullOrEmpty(thrSpec)
+			? rejects.Select(r => (Tau: tau, Margin: margin, Reject: r, Tag: (string)null)).ToList()
+			: thrSpec.Split(',').Select(x => x.Trim()).Where(x => x.Length > 0).Select(x =>
+			{
+				var pr = x.Split(':');
+				double t = double.Parse(pr[0], CultureInfo.InvariantCulture), m = double.Parse(pr[1], CultureInfo.InvariantCulture);
+				return (Tau: t, Margin: m, Reject: t / (1.0 - m), Tag: pr[0] + ":" + pr[1]);
+			}).ToList();
+		// --only-queries файл (e25): строки «label<TAB>query_id» — построчный вывод только для этих точек (точки эталона)
+		HashSet<string> onlyQueries = null;
+		var onlyPath = Get(a, "only-queries");
+		if (!string.IsNullOrEmpty(onlyPath))
+			onlyQueries = new HashSet<string>(File.ReadLines(onlyPath).Where(x => x.Length > 0), StringComparer.Ordinal);
 		var outPath = Get(a, "out"); var pqPath = Get(a, "per-query");
 		var pairRows = new List<string>(); var pqRows = new List<string>();
 		Func<MethodAnchor, MethodAnchor, double> dist = (x, y) => Dist.AnchorDistance(x, y, w);
@@ -616,7 +632,7 @@ static class Program
 		int done = 0;
 		int warmup = GetInt(a, "warmup", 0);   // прогрев JIT: первая пара решается warmup раз без записи
 		int warmupAll = GetInt(a, "warmup-all", 0);   // прогрев всех путей кода: весь манифест проходится warmup-all раз без записи
-		double radius = rejects.Max();          // --k 0: кандидаты — все якоря с d ≤ radius (при нескольких ценах отказа списки полны для каждой)
+		double radius = thresholds.Max(x => x.Reject);   // --k 0: кандидаты — все якоря с d ≤ radius (при нескольких ценах отказа списки полны для каждой)
 		int verifyRadius = GetInt(a, "verify-radius", 0);
 		long verifyChecked = 0, verifyMismatch = 0;
 		var jobList = manifest.OfType<JObject>().ToList();
@@ -713,24 +729,26 @@ static class Program
 				verifyChecked += vChecked; verifyMismatch += vMismatch;
 			}
 
-			foreach (double reject in rejects)
+			foreach (var thr in thresholds)
 			{
-				var opt = new AssignmentRebind.Options { Tau = tau, Margin = margin, RejectCost = reject, EnumerateLimit = enumLimit, KBest = serverMode ? 0 : kBest };
+				double reject = thr.Reject;
+				var opt = new AssignmentRebind.Options { Tau = thr.Tau, Margin = thr.Margin, RejectCost = reject, EnumerateLimit = enumLimit, KBest = serverMode ? 0 : kBest };
 				sw.Restart();
 				var result = AssignmentRebind.Solve(pts, opt);
 				sw.Stop();
 				double assignMs = sw.Elapsed.TotalMilliseconds;
 				var decByQ = result.Decisions.ToDictionary(d => d.Point, d => d);
-				string rs = reject.ToString("0.####", CultureInfo.InvariantCulture);
+				string rs = thr.Tag ?? reject.ToString("0.####", CultureInfo.InvariantCulture);
 				int nAcc = 0, nAmb = 0, nLost = 0;
 				for (int q = 0; q < queries.Count; q++)
 				{
+					bool keep = onlyQueries == null || onlyQueries.Contains(label + "	" + queries[q].Id);
 					string trueId = null; bool hasGt = gt != null && gt.TryGetValue(queries[q].Id, out trueId);
 					string trueCell = hasGt ? (trueId ?? "") : "";
 					if (exact.TryGetValue(q, out int ip))
 					{
 						nAcc++;
-						if (record) pqRows.Add(Csv(label, rs, queries[q].Id, trueCell, hasGt, "exact", "accepted", index[ip].Id, 0.0, double.PositiveInfinity, 1.0, -1, 1, "", "", 0));
+						if (record && keep) pqRows.Add(Csv(label, rs, queries[q].Id, trueCell, hasGt, "exact", "accepted", index[ip].Id, 0.0, double.PositiveInfinity, 1.0, -1, 1, "", "", 0));
 						continue;
 					}
 					var d = decByQ[q];
@@ -745,7 +763,7 @@ static class Program
 					string ids = string.Join(";", knn.Select(r => rest[r.Index].Id));
 					string ds = string.Join(";", knn.Select(r => r.Dist.ToString("R", CultureInfo.InvariantCulture)));
 					int nWithin = knn.Count(r => r.Dist <= reject);
-					if (record) pqRows.Add(Csv(label, rs, queries[q].Id, trueCell, hasGt, "assign", status, d.Candidate >= 0 ? rest[d.Candidate].Id : "",
+					if (record && keep) pqRows.Add(Csv(label, rs, queries[q].Id, trueCell, hasGt, "assign", status, d.Candidate >= 0 ? rest[d.Candidate].Id : "",
 						d.Dist, d.Delta, d.Ratio, d.Component, d.ComponentSize, ids, ds, nWithin));
 				}
 				var comps = result.Components.Where(c => c.Points.Count >= 2).ToList();
