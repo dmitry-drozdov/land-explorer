@@ -702,7 +702,8 @@ static class Program
 			// сервер обходит несопоставленные старые точки по возрастанию Id и запрашивает не меньше двух соседей
 			var layer2Order = Enumerable.Range(0, queries.Count).Where(q => !exact.ContainsKey(q)).ToList();
 			if (serverMode) layer2Order = layer2Order.OrderBy(q => queries[q].Id ?? "", StringComparer.Ordinal).ToList();
-			int kQuery = serverMode ? Math.Max(2, k) : k;
+			// k = 0 — радиусный запрос (все якоря с d ≤ R) и в режиме сервера (e31, 2026-10-24); иначе сервер запрашивает не меньше двух соседей
+			int kQuery = k == 0 ? 0 : (serverMode ? Math.Max(2, k) : k);
 			foreach (int q in layer2Order)
 			{
 				var knn = tree == null ? new List<VPTree<MethodAnchor>.KNNResult>()

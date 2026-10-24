@@ -18,14 +18,14 @@ namespace VPTree
 	/// Выбор пользователя в строке — условие: считаются только расстановки, совместимые с выбором. Проценты в списке
 	/// строки, выбранной пользователем, считаются без её собственного выбора (иначе выбранный пункт всегда 100 %).
 	///
-	/// T подобрана максимумом правдоподобия на e11 tune (temperature scaling, Guo et al., 2017, § 4.2):
-	/// markup/experiments/_explore/2026-09-27_distance_questions/results/calibration_params.json;
-	/// ошибка калибровки ECE на e11 test и e12 — 0,029. Реализация повторяет scripts/common.py (gibbs_components).
+	/// T подобрана максимумом правдоподобия (temperature scaling, Guo et al., 2017, § 4.2) в серии e31 (2026-10-24) на 480 точках
+	/// калибровочной выборки статьи при R = 0,70: markup/experiments/e31_review_recounts/results/temperature.json; ECE на контрольной
+	/// выборке 0,049. Прежнее значение 0,059553 — разведка 2026-09-27 при R = 0,4286. Реализация повторяет scripts/common.py (gibbs_components).
 	/// </summary>
 	public static class AssignmentProbabilities
 	{
-		/// <summary>Температура, подобранная на e11 tune.</summary>
-		public const double DefaultTemperature = 0.059553;
+		/// <summary>Температура, подобранная в e31 на калибровочной выборке статьи при R = 0,70.</summary>
+		public const double DefaultTemperature = 0.20306;   // e31 (2026-10-24): максимум правдоподобия на 480 точках калибровочной выборки статьи при R = 0,70
 
 		/// <summary>Компоненты не больше этого числа точек считаются перебором всех расстановок (точно).</summary>
 		public const int DefaultEnumerateLimit = 10;
