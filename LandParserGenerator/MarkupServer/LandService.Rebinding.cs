@@ -175,18 +175,23 @@ namespace MarkupServer
 		internal sealed class RebindSettings
 		{
 			/// <summary>
-			/// Порог дистанции для уверенной привязки. Калибровка по кривой risk–coverage на tune-части
-			/// корпуса реальной истории (experiments/e05, веса e02/02): tau = 0.30, margin = 0.30 дают
-			/// покрытие 98.4 % при доле ошибочных автопривязок 0.08 % (на всём корпусе 99.4 % / 0.03 %).
+			/// Порог дистанции для уверенной привязки — рабочая точка статьи: tau = 0.49, margin = 0.30, R = tau / (1 − margin) = 0.70
+			/// (experiments/e27_threshold_recalibration, решение пользователя 2026-10-20; на проверочной выборке «перенесено само
+			/// и верно» 74,1 % → 81,6 % без роста доли ошибочных). Прежняя точка 0.30 / 0.30 (R = 0.4286) — калибровка e05.
+			/// Температура процентов <see cref="Temperature"/> подобрана в e31 именно при R = 0.70.
 			/// </summary>
-			public double Tau = ReadEnvDouble("LAND_REBIND_TAU", 0.30);
+			public double Tau = ReadEnvDouble("LAND_REBIND_TAU", DefaultTau);
 			/// <summary>Минимальный относительный отрыв (d2 - d1) / d2. Без него риск вырастает в 3–4 раза.</summary>
-			public double MinRelativeMargin = ReadEnvDouble("LAND_REBIND_MARGIN", 0.30);
+			public double MinRelativeMargin = ReadEnvDouble("LAND_REBIND_MARGIN", DefaultMargin);
+
+			/// <summary>Рабочая точка статьи (e27): общий порог для поточечного правила и шага назначения.</summary>
+			internal const double DefaultTau = 0.49;
+			internal const double DefaultMargin = 0.30;
 			/// <summary>Сколько соседей запрашивать у индекса (нужно ≥ 2 для margin).</summary>
 			public int K = 2;
 			/// <summary>Сколько кандидатов показывать пользователю с процентами (калибровка T — по трём ближайшим).</summary>
 			public int KCandidates = 3;
-			/// <summary>Температура процентов (VPTreeLib.AssignmentProbabilities; подобрана на e11 tune).</summary>
+			/// <summary>Температура процентов (VPTreeLib.AssignmentProbabilities; подобрана в e31 на калибровочной выборке при R = 0.70).</summary>
 			public double Temperature = ReadEnvDouble("LAND_REBIND_T", AssignmentProbabilities.DefaultTemperature);
 			/// <summary>Цена варианта «не переносить» в процентах: R = tau / (1 − margin), как у шага назначения.</summary>
 			public double RejectCost => Tau / (1.0 - MinRelativeMargin);

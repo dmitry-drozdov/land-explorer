@@ -1668,18 +1668,17 @@ namespace MarkupServer
 		{
 			/// <summary>
 			/// Порог дистанции для callable-профилей (gqlField, tsMember). 0 = слой 2 выключен.
-			/// До сентября 2026 был 0.0 (слой отключён). Калибровка по risk–coverage на tune-части
-			/// корпуса реальной истории (experiments/e05): tau 0.30 + margin 0.30 → покрытие 98.4 %,
-			/// ошибочных автопривязок 0.08 %.
+			/// До сентября 2026 был 0.0 (слой отключён), затем 0.30 (e05). Сейчас — рабочая точка статьи: tau 0.49 + margin 0.30,
+			/// цена отказа R = 0.70 (experiments/e27_threshold_recalibration, решение пользователя 2026-10-20).
 			/// </summary>
-			public double MaxDistanceCallable = RebindSettings.ReadEnvDouble("LAND_STITCH_TAU", 0.30);
+			public double MaxDistanceCallable = RebindSettings.ReadEnvDouble("LAND_STITCH_TAU", RebindSettings.DefaultTau);
 			/// <summary>
 			/// Порог для record-профилей (gqlTypeDef, gqlInputDef, gqlInterfaceDef). Веса record-профиля
 			/// не калибровались; значение предварительное.
 			/// </summary>
 			public double MaxDistanceRecord = RebindSettings.ReadEnvDouble("LAND_STITCH_TAU_RECORD", 0.45);
 			/// <summary>Минимальный относительный отрыв второго кандидата (d2 - d1) / d2.</summary>
-			public double MinRelativeMargin = RebindSettings.ReadEnvDouble("LAND_STITCH_MARGIN", 0.30);
+			public double MinRelativeMargin = RebindSettings.ReadEnvDouble("LAND_STITCH_MARGIN", RebindSettings.DefaultMargin);
 			/// <summary>Сколько ближайших кандидатов запрашивать у индекса: рёбра графа назначения (AssignmentRebind).</summary>
 			public int K = (int)RebindSettings.ReadEnvDouble("LAND_STITCH_K", 3);
 			/// <summary>Цена точки без привязки в задаче о назначениях; NaN — tau / (1 − margin) (см. AssignmentRebind).</summary>

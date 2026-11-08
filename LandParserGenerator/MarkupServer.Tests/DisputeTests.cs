@@ -86,6 +86,14 @@ public class DisputeTests
 	private static TreeNodeClientV2 Root(ListTreeResultV2 res, string sys)
 		=> (res?.r ?? new List<TreeNodeClientV2>()).FirstOrDefault(n => n.sys == sys);
 
+	/// <summary>Список точки — по убыванию оценки уверенности пары (статья §4.3), «не переносить» наравне с кандидатами.</summary>
+	private static void AssertSortedByConfidence(DisputePointV2 pt)
+	{
+		for (int i = 1; i < pt.o.Count; i++)
+			Assert.IsTrue(pt.o[i - 1].p >= pt.o[i].p,
+				$"options of {pt.n} are sorted by confidence: " + string.Join(", ", pt.o.Select(o => $"{o.n ?? "не переносить"} {o.p:F3}")));
+	}
+
 	private async Task<(LandService Svc, string A, string B, UserGroupResultV2 Group)> TieScenario(bool withUserData)
 	{
 		WriteSchema(SchemaAB);
@@ -123,7 +131,7 @@ public class DisputeTests
 		Assert.AreEqual(2, d.Points.Count);
 		Assert.IsTrue(d.Points.All(p => p.Status == AssignmentRebind.Status.Ambiguous));
 		Assert.IsTrue(d.Points.All(p => p.Candidates.Count == 1 && p.Candidates[0].Fresh.Name == "getUserX"));
-		Assert.AreEqual(0.30 / 0.70, d.RejectCost, 1e-12);
+		Assert.AreEqual(0.49 / (1 - 0.30), d.RejectCost, 1e-12, "reject cost of the article working point (e27): R = 0.70");
 		CollectionAssert.AreEquivalent(new[] { "gql:Query.getUserA", "gql:Query.getUserB" }, res.LostCandidates.Keys.ToList());
 	}
 
@@ -175,14 +183,20 @@ public class DisputeTests
 		{
 			Assert.AreEqual(2, pt.o.Count, "one candidate + «не переносить»");
 			Assert.AreEqual(1.0, pt.o.Sum(o => o.p), 1e-9, "row percentages sum to 100 %");
-			Assert.IsNull(pt.o[1].t);
+			Assert.AreEqual(1, pt.o.Count(o => o.t == null), "exactly one «не переносить»");
+			AssertSortedByConfidence(pt);
 		}
-		var x = view.points[0].o[0].t;
-		Assert.AreEqual(x, view.points[1].o[0].t, "both points compete for the same field");
-		var closer = view.points.OrderBy(pt => pt.o[0].d).First();
-		var farther = view.points.OrderBy(pt => pt.o[0].d).Last();
-		Assert.IsTrue(closer.o[0].p > farther.o[0].p, "the closer point gets the larger share of the field");
-		Assert.AreEqual(1.0, closer.o[0].p + farther.o[0].p, 0.02, "the field goes to one of them almost surely");
+		DisputeOptionV2 Field(DisputePointV2 pt) => pt.o.Single(o => o.t != null);
+		var x = Field(view.points[0]).t;
+		Assert.AreEqual(x, Field(view.points[1]).t, "both points compete for the same field");
+		var closer = view.points.OrderBy(pt => Field(pt).d).First();
+		var farther = view.points.OrderBy(pt => Field(pt).d).Last();
+		Assert.IsTrue(Field(closer).p > Field(farther).p, "the closer point gets the larger share of the field");
+		// поле достаётся не больше чем одной точке (назначение один-к-одному), а при R = 0,70 и T = 0,203 — почти наверняка одной из них:
+		// остаток — вероятность, что обе точки без привязки
+		var fieldTaken = Field(closer).p + Field(farther).p;
+		Assert.IsTrue(fieldTaken <= 1.0 + 1e-9, $"the field goes to at most one point: {fieldTaken:F4}");
+		Assert.IsTrue(fieldTaken > 0.9, $"the field most likely goes to one of them: {fieldTaken:F4}");
 		Assert.IsTrue(view.top.Count >= 2);
 
 		// выбор: A → X. У A проценты без её выбора (как до выбора), у B поле X занято.
@@ -194,9 +208,12 @@ public class DisputeTests
 		var pa = pinned.points.Single(p => p.id == a);
 		var pb = pinned.points.Single(p => p.id == b);
 		Assert.AreEqual(x, pa.pin);
-		Assert.AreEqual(view.points.Single(p => p.id == a).o[0].p, pa.o[0].p, 1e-9, "leave-one-out: the model's view of A");
+		Assert.AreEqual(Field(view.points.Single(p => p.id == a)).p, pa.o.Single(o => o.t == x).p, 1e-9, "leave-one-out: the model's view of A");
 		Assert.AreEqual(0.0, pb.o.Single(o => o.t == x).p, 1e-12, "X is taken by the user's choice");
 		Assert.AreEqual(1.0, pb.o.Single(o => o.t == null).p, 1e-12);
+		Assert.IsNull(pb.o[0].t, "after the user's choice «не переносить» is B's most confident option and comes first");
+		AssertSortedByConfidence(pa);
+		AssertSortedByConfidence(pb);
 		Assert.AreEqual(x, pinned.top[0].a[pinned.points.IndexOf(pa)]);
 
 		// несовместимый выбор
@@ -215,7 +232,7 @@ public class DisputeTests
 		var (svc, a, b, grp) = await TieScenario(withUserData: true);
 		await ListAsync(svc);
 		var view = await svc.GetDisputeAsync(new GetDisputeParams());
-		var x = view.points[0].o[0].t;
+		var x = view.points[0].o.Single(o => o.t != null).t;
 
 		var bad = await svc.ResolveDisputeAsync(new ResolveDisputeParams
 		{
@@ -309,6 +326,7 @@ public class DisputeTests
 		var names = view.points[0].o.Where(o => o.t != null).Select(o => o.n).ToList();
 		CollectionAssert.IsSubsetOf(new[] { "getUserX", "getUserY" }, names);
 		Assert.AreEqual(1.0, view.points[0].o.Sum(o => o.p), 1e-9);
+		AssertSortedByConfidence(view.points[0]);
 	}
 
 	[TestMethod]

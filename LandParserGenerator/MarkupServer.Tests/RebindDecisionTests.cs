@@ -64,6 +64,24 @@ public class RebindDecisionTests
 	}
 
 	[TestMethod]
+	public void Defaults_Are_The_Article_Working_Point()
+	{
+		// e27 (решение 2026-10-20): tau = 0.49, m = 0.30, R = 0.70; T подобрана в e31 при этом R.
+		// Проценты окна спорных групп осмысленны только при согласованных R и T.
+		var rs = LandService.RebindSettings.Default;
+		Assert.AreEqual(0.49, rs.Tau, 1e-12);
+		Assert.AreEqual(0.30, rs.MinRelativeMargin, 1e-12);
+		Assert.AreEqual(0.70, rs.RejectCost, 1e-12);
+		Assert.AreEqual(VPTree.AssignmentProbabilities.DefaultTemperature, rs.Temperature, 1e-12);
+
+		var st = LandService.StitchSettings.Default;
+		Assert.AreEqual(0.49, st.MaxDistanceCallable, 1e-12);
+		Assert.AreEqual(0.30, st.MinRelativeMargin, 1e-12);
+		Assert.AreEqual(3, st.K, "не более трёх ближайших кандидатов (статья §6.1)");
+		Assert.IsTrue(double.IsNaN(st.RejectCost), "цена отказа по умолчанию — tau / (1 − m)");
+	}
+
+	[TestMethod]
 	public void Margin_Is_Scale_Invariant()
 	{
 		// Одинаковое относительное разделение → одинаковый вердикт при разной абсолютной близости

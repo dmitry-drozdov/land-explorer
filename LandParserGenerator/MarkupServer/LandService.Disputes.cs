@@ -369,6 +369,10 @@ namespace MarkupServer
 					});
 				}
 				dp.o.Add(new DisputeOptionV2 { t = null, d = r, p = menu.RowP(i, AssignmentProbabilities.None) });
+				// список точки — по убыванию оценки уверенности пары (статья §4.3 и формула (22)); «не переносить» — наравне с
+				// кандидатами: его оценка — та же формула при b = f_a. Сортировка устойчивая: при равных процентах — по расстоянию,
+				// «не переносить» (d = R) после кандидатов
+				dp.o = dp.o.OrderByDescending(o => o.p).ToList();
 				view.points.Add(dp);
 			}
 
