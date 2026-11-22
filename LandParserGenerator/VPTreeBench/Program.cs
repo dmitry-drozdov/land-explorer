@@ -654,6 +654,17 @@ static class Program
 			onlyQueries = new HashSet<string>(File.ReadLines(onlyPath).Where(x => x.Length > 0), StringComparer.Ordinal);
 		var outPath = Get(a, "out"); var pqPath = Get(a, "per-query");
 		var pairRows = new List<string>(); var pqRows = new List<string>();
+		// --conf-out файл (e34): оценки уверенности 6.3 статьи по каждой компоненте шага назначения, как в сервере плагина
+		// (AssignmentProbabilities.Component по рёбрам d ≤ R, без выбора пользователя): строки kind=row — оценка пары «точка — выбор»,
+		// kind=top — лучшие назначения. --conf-enum-limit и --conf-variants — пороги 6.3 (по умолчанию как в сервере, 10 и 100),
+		// --conf-repeats — повторы расчёта для замера времени (медиана), --temperature — T (по умолчанию DefaultTemperature).
+		var confPath = Get(a, "conf-out");
+		int confEnum = GetInt(a, "conf-enum-limit", AssignmentProbabilities.DefaultEnumerateLimit);
+		int confVariants = GetInt(a, "conf-variants", AssignmentProbabilities.DefaultApproxVariants);
+		int confRepeats = Math.Max(1, GetInt(a, "conf-repeats", 1));
+		int confTop = GetInt(a, "conf-top", 3);
+		double temperature = GetDouble(a, "temperature", AssignmentProbabilities.DefaultTemperature);
+		var confRows = new List<string>();
 		Func<MethodAnchor, MethodAnchor, double> dist = (x, y) => Dist.AnchorDistance(x, y, w);
 		var sw = new Stopwatch();
 		int done = 0;
@@ -794,6 +805,53 @@ static class Program
 					if (record && keep) pqRows.Add(Csv(label, rs, queries[q].Id, trueCell, hasGt, "assign", status, d.Candidate >= 0 ? rest[d.Candidate].Id : "",
 						d.Dist, d.Delta, d.Ratio, d.Component, d.ComponentSize, ids, ds, nWithin));
 				}
+				if (record && confPath != null)
+				{
+					var ptByQ = pts.ToDictionary(p => p.Index, p => p);
+					foreach (var comp in result.Components)
+					{
+						var members = comp.Points;
+						var candIds = new List<int>(); var candIndex = new Dictionary<int, int>();
+						var edgesC = new List<IReadOnlyList<(int Cand, double Dist)>>();
+						foreach (int q in members)
+						{
+							var best = new Dictionary<int, double>();
+							foreach (var c in ptByQ[q].Candidates)
+							{
+								if (c == null || double.IsNaN(c.Dist) || c.Dist > reject) continue;
+								if (!best.TryGetValue(c.Index, out var dd) || c.Dist < dd) best[c.Index] = c.Dist;
+							}
+							var list = new List<(int Cand, double Dist)>();
+							foreach (var kv in best.OrderBy(e => e.Value).ThenBy(e => e.Key))
+							{
+								if (!candIndex.TryGetValue(kv.Key, out int ci)) { ci = candIds.Count; candIndex[kv.Key] = ci; candIds.Add(kv.Key); }
+								list.Add((ci, kv.Value));
+							}
+							edgesC.Add(list);
+						}
+						AssignmentProbabilities.Distribution distr = null;
+						var times = new List<double>(confRepeats);
+						for (int rep = 0; rep < confRepeats; rep++)
+						{
+							sw.Restart();
+							distr = AssignmentProbabilities.Component(edgesC, temperature, reject, null, confTop, confEnum, confVariants);
+							sw.Stop();
+							times.Add(sw.Elapsed.TotalMilliseconds);
+						}
+						times.Sort();
+						string head = Csv(label, rs, comp.Id, members.Count, candIds.Count, distr!.Exact ? 1 : 0, distr.VariantCount, times[times.Count / 2]);
+						string ChoiceId(int c) => c == AssignmentProbabilities.None ? "" : rest[candIds[c]].Id;
+						for (int i = 0; i < members.Count; i++)
+							foreach (var kv in distr.Rows[i].OrderBy(e => e.Key))
+								confRows.Add(head + "," + Csv("row", queries[members[i]].Id, ChoiceId(kv.Key), "", kv.Value));
+						for (int r = 0; r < distr.Top.Count; r++)
+						{
+							var tv = distr.Top[r];
+							string ch = string.Join(";", tv.Choice.Select((c, i) => queries[members[i]].Id + "=" + ChoiceId(c)));
+							confRows.Add(head + "," + Csv("top", r + 1, ch, tv.Cost, tv.P));
+						}
+					}
+				}
 				var comps = result.Components.Where(c => c.Points.Count >= 2).ToList();
 				if (record) pairRows.Add(Csv(label, rs, index.Count, queries.Count, exact.Count, rest.Count, prepassMs, treeMs, knnMs, assignMs,
 					comps.Count, comps.Count > 0 ? comps.Max(c => c.Points.Count) : 0, result.EnumeratedComponents, result.LapComponents, nAcc, nAmb, nLost,
@@ -814,6 +872,8 @@ static class Program
 		AppendCsv(outPath, "label,reject,n_index,n_queries,n_exact,n_index_rest,prepass_ms,tree_ms,knn_ms,assign_ms,n_components,max_component,n_enumerated,n_lap,n_accepted,n_ambiguous,n_lost,k,n_cand_total,verify_checked,verify_mismatch", pairRows);
 		if (!string.IsNullOrEmpty(pqPath))
 			AppendCsv(pqPath, "label,reject,query_id,true_id,has_gt,source,status,cand_id,dist,delta,ratio,component,component_size,topk_ids,topk_dists,n_within", pqRows);
+		if (!string.IsNullOrEmpty(confPath))
+			AppendCsv(confPath, "label,reject,component,size,n_cands,exact,variant_count,time_ms,kind,item,choice,cost,p", confRows);
 		Console.Error.WriteLine($"[assign-batch] done {done} jobs, {pqRows.Count} query rows, k={k}{(k == 0 ? $" (radius {radius.ToString("0.####", CultureInfo.InvariantCulture)})" : "")}, rejects={string.Join(",", rejects.Select(r => r.ToString("0.####", CultureInfo.InvariantCulture)))}"
 			+ (verifyRadius > 0 && k == 0 ? $", radius verify: {verifyChecked} checked, {verifyMismatch} mismatches" : ""));
 		return 0;
