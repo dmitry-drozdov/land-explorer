@@ -58,6 +58,23 @@ namespace VPTree
 			BuildNeighborBags(anchors, NeighborBagKind.Rich, window);
 		}
 
+		// ===== Константы мешка соседей вида Rich (статья, формулы (9) и (10)) =====
+		// Значения по умолчанию — значения статьи и сервера плагина. Настраиваются только стендом для анализа
+		// чувствительности (markup/experiments/e33); при любых неотрицательных значениях взвешенный Жаккар остаётся метрикой.
+
+		/// <summary>Доля Rarity для ключа заголовка соседа без имени (HeaderWithoutName): 0,25.</summary>
+		public static double NeighborCoarseFactor = 0.25;
+
+		/// <summary>Доля Rarity полного заголовка для ключа с позицией соседа (PositionedHeader): 0,20.</summary>
+		public static double NeighborDirFactor = 0.20;
+
+		/// <summary>Степень p убывания веса соседа 1/(1 + |Δ|)^p; в статье p = 1.</summary>
+		public static double NeighborDecayPower = 1.0;
+
+		/// <summary>Вес соседа на расстоянии ad позиций; при p = 1 — прежнее выражение 1/(1 + ad) без изменения результата.</summary>
+		static double NeighborDecay(int ad)
+			=> NeighborDecayPower == 1.0 ? 1.0 / (1.0 + ad) : Math.Pow(1.0 + ad, -NeighborDecayPower);
+
 		/// <summary>
 		/// Строит NeighborBag для якорей (на месте). Соседи берутся внутри группы
 		/// (File, ParentNameNorm) при groupByFile = true, иначе внутри ParentNameNorm.
@@ -75,8 +92,8 @@ namespace VPTree
 			}
 
 			// ===== NeighborBag tuning knobs (Rich) =====
-			const double CoarseFactor = 0.25;
-			const double DirFactor = 0.20;
+			double CoarseFactor = NeighborCoarseFactor;
+			double DirFactor = NeighborDirFactor;
 			const bool UseIdf = true;
 
 			Dictionary<string, double> idf = null;
@@ -161,7 +178,7 @@ namespace VPTree
 
 							int delta = j - i;
 							int ad = delta >= 0 ? delta : -delta;
-							double w = 1.0 / (1.0 + ad);
+							double w = NeighborDecay(ad);
 
 							var nb = list[j];
 							string kFine = Dist.NeighborSigKeyFine(nb);

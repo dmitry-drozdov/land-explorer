@@ -658,6 +658,14 @@ namespace VPTree
 
 		public static double ArgNullCost(double wType, double wName) { return wType + wName; }
 
+		/// <summary>Вес различия имён в стоимости пары аргументов (статья, формула (5): 0,5). Настраивается для анализа
+		/// чувствительности (markup/experiments/e33); делитель нормировки пересчитывается как ArgMaxCount·(1 + ArgNameWeight).</summary>
+		public static double ArgNameWeight = 0.5;
+
+		/// <summary>Штраф за аргумент без пары (статья: 1 — наибольшее различие типов; имена не штрафуются). Метричность полного
+		/// назначения требует ArgUnmatchedCost ≥ (1 + ArgNameWeight)/2 (см. комментарий к ArgsDistance). Настраивается для e33.</summary>
+		public static double ArgUnmatchedCost = 1.0;
+
 		// Hungarian-based permutation-invariant distance.
 		//
 		// Метричность (режим Constant):
@@ -679,8 +687,8 @@ namespace VPTree
 			int n = A.Count > B.Count ? A.Count : B.Count;
 			if (n == 0) return 0.0;
 
-			double wt = 1.0, wn = 0.5;
-			double nullCost = ArgNullCost(wt, 0.0); // только тип, имена не штрафуем
+			double wt = 1.0, wn = ArgNameWeight;
+			double nullCost = ArgUnmatchedCost; // по умолчанию ArgNullCost(wt, 0) = 1: только тип, имена не штрафуем
 
 			var C = new double[n, n];
 			for (int i = 0; i < n; i++)

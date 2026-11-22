@@ -31,6 +31,7 @@ static class Program
 		var args = ParseArgs(argv.Skip(1));
 		try
 		{
+			ApplyDistanceConstants(args);
 			switch (cmd)
 			{
 				case "axioms": return Axioms(args);
@@ -205,7 +206,9 @@ static class Program
   VPTreeBench determinism --anchors a.json [--repeats 20] [--queries 200] [--out res.csv]
   VPTreeBench build-cost --manifest jobs.json [--repeats 7] [--mode ...] [--bags ...] [--weights ...] --out cost.csv
   VPTreeBench save-index --anchors a.json --out-dir DIR [--label text] [--parents Query,Mutation] [--bags ...] [--weights ...] [--window 4] [--verify 200] [--also-nobags] [--repeats 1] --out sizes.csv
-  knn-batch also accepts --window N (neighbor bag window, default 4)");
+  knn-batch also accepts --window N (neighbor bag window, default 4)
+  all commands accept distance constants (e33; defaults = article): --lev-fine 0.9 --lev-coarse-mul 4 --arg-name-weight 0.5
+    --arg-null-cost 1 --neigh-coarse 0.25 --neigh-dir 0.20 --neigh-decay 1; axioms also accepts --window N");
 	}
 
 	// ----------------------------------------------------------------- helpers
@@ -225,6 +228,30 @@ static class Program
 	static string Get(Dictionary<string, string> a, string k, string def = null) => a.TryGetValue(k, out var v) ? v : def;
 	static int GetInt(Dictionary<string, string> a, string k, int def) => a.TryGetValue(k, out var v) ? int.Parse(v, CultureInfo.InvariantCulture) : def;
 	static double GetDouble(Dictionary<string, string> a, string k, double def) => a.TryGetValue(k, out var v) ? double.Parse(v, CultureInfo.InvariantCulture) : def;
+
+	// Константы функции расстояния для анализа чувствительности (markup/experiments/e33). Без флагов — значения статьи
+	// и сервера плагина: --lev-fine 0.9 (формула (4)), --lev-coarse-mul 4 (4s), --arg-name-weight 0.5 ((5); делитель (6)
+	// пересчитывается как argmax·(1 + вес)), --arg-null-cost 1 (штраф за аргумент без пары), --neigh-coarse 0.25 и
+	// --neigh-dir 0.20 ((9)), --neigh-decay 1 (степень p в 1/(1 + |Δ|)^p, (10)). Окно — прежний флаг --window.
+	static void ApplyDistanceConstants(Dictionary<string, string> a)
+	{
+		Dist.LevFineWeight = GetDouble(a, "lev-fine", Dist.LevFineWeight);
+		Dist.LevCoarseMul = GetInt(a, "lev-coarse-mul", Dist.LevCoarseMul);
+		Dist.ArgNameWeight = GetDouble(a, "arg-name-weight", Dist.ArgNameWeight);
+		Dist.ArgUnmatchedCost = GetDouble(a, "arg-null-cost", Dist.ArgUnmatchedCost);
+		AnchorsIO.NeighborCoarseFactor = GetDouble(a, "neigh-coarse", AnchorsIO.NeighborCoarseFactor);
+		AnchorsIO.NeighborDirFactor = GetDouble(a, "neigh-dir", AnchorsIO.NeighborDirFactor);
+		AnchorsIO.NeighborDecayPower = GetDouble(a, "neigh-decay", AnchorsIO.NeighborDecayPower);
+		if (Dist.LevFineWeight < 0 || Dist.LevFineWeight > 1 || Dist.LevCoarseMul < 2 || Dist.ArgNameWeight < 0
+			|| AnchorsIO.NeighborCoarseFactor < 0 || AnchorsIO.NeighborDirFactor < 0 || AnchorsIO.NeighborDecayPower < 0)
+			throw new ArgumentException("константы расстояния вне допустимых пределов (e33)");
+		if (Dist.ArgUnmatchedCost < (1.0 + Dist.ArgNameWeight) / 2 - 1e-12)
+			throw new ArgumentException("--arg-null-cost меньше (1 + --arg-name-weight)/2: ArgsDistance перестаёт быть метрикой");
+		string[] keys = { "lev-fine", "lev-coarse-mul", "arg-name-weight", "arg-null-cost", "neigh-coarse", "neigh-dir", "neigh-decay" };
+		if (keys.Any(a.ContainsKey))
+			Console.Error.WriteLine(FormattableString.Invariant(
+				$"[constants] lev-fine={Dist.LevFineWeight} lev-coarse-mul={Dist.LevCoarseMul} arg-name-weight={Dist.ArgNameWeight} arg-null-cost={Dist.ArgUnmatchedCost} neigh-coarse={AnchorsIO.NeighborCoarseFactor} neigh-dir={AnchorsIO.NeighborDirFactor} neigh-decay={AnchorsIO.NeighborDecayPower}"));
+	}
 
 	static Dist.Weights MakeWeights(Dictionary<string, string> a)
 	{
@@ -328,7 +355,7 @@ static class Program
 	static int Axioms(Dictionary<string, string> a)
 	{
 		var anchors = CanonicalOrder.Sort(LoadAnchors(Get(a, "anchors") ?? throw new ArgumentException("--anchors")));
-		AnchorsIO.BuildNeighborBags(anchors, BagKind(a), 4);
+		AnchorsIO.BuildNeighborBags(anchors, BagKind(a), GetInt(a, "window", 4));
 		var w = MakeWeights(a);
 		int triples = GetInt(a, "triples", 100000);
 		int seed = GetInt(a, "seed", 42);
